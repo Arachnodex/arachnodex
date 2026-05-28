@@ -1,0 +1,33 @@
+{
+  "name": "@arachnodex/workspace",
+  "description": "Arachnodex monorepo for the modular crawler CLI, create package, bundled jobs, and bot heuristics.",
+  "private": true,
+  "packageManager": "npm@11.13.0",
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm exec --workspaces -- tsc --noEmit --pretty false",
+    "lint": "npm exec -- eslint \"packages/**/src/**/*.ts\" --ignore-pattern \"**/*.d.ts\"",
+    "check": "npm run build && npm run typecheck && npm run lint && git diff --check && git diff --exit-code -- packages",
+    "crawl-dev": "npm --workspace @arachnodex/core run crawl:src --"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arachnodex/arachnodex.git"
+  },
+  "author": "Rick Kukiela <rick@belniakmedia.com>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Arachnodex/arachnodex/issues"
+  },
+  "homepage": "https://github.com/Arachnodex/arachnodex#readme",
+  "engines": {
+    "node": ">=24.16.0 <25"
+  },
+  "workspaces": [
+    "packages/bot-protection-heuristics",
+    "packages/create",
+    "packages/core",
+    "packages/job-link-issues",
+    "packages/job-sitemap"
+  ]
+}

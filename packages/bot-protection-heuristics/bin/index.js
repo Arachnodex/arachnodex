@@ -1,0 +1,1 @@
+var e={headerMarkers:["x-iinfo:","visid_incap_","incap_ses_","incapsula","cf-mitigated: challenge","datadome"],bodyMarkers:["/_incapsula_resource","cf-chl-","checking your browser","not a robot","captcha","datadome"]};export{e as botProtectionHeuristics};

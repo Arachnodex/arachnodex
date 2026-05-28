@@ -1,0 +1,186 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{subject}}</title>
+    <style type="text/css">
+        img { max-width: 600px; outline: none; text-decoration: none; -ms-interpolation-mode: bicubic; }
+        a img { border: none; }
+        table { border-collapse: collapse !important; }
+        table td { border-collapse: collapse; }
+        body {
+            -webkit-font-smoothing: antialiased;
+            -webkit-text-size-adjust: none;
+            width: 100% !important;
+            margin: 0 !important;
+            height: 100%;
+            color: #676767;
+            background-color: #f6f6f6;
+        }
+        * { font-family: Helvetica, Arial, sans-serif; }
+        td {
+            font-family: Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            color: #777777;
+            line-height: 21px;
+        }
+        a { color: #4d4d4d; text-decoration: none !important; }
+        .container-for-gmail-android { min-width: 600px; }
+        .w600 { width: 600px; }
+        .header-lg {
+            font-size: 28px;
+            font-weight: 700;
+            line-height: 34px;
+            color: #4d4d4d;
+            text-align: center;
+            padding: 28px 40px 10px;
+        }
+        .free-text {
+            padding: 10px 60px 24px;
+            text-align: center;
+        }
+        .mini-block {
+            border: 1px solid #e5e5e5;
+            border-radius: 5px;
+            background-color: #ffffff;
+            padding: 15px;
+            text-align: left;
+        }
+        .stat-label {
+            color: #4d4d4d;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .stat-value {
+            color: #4d4d4d;
+            font-size: 24px;
+            font-weight: 700;
+            padding-top: 5px;
+        }
+        .footer {
+            color: #999999;
+            font-size: 12px;
+            text-align: center;
+            padding: 20px;
+        }
+        @media only screen and (max-width: 480px) {
+            table[class*="container-for-gmail-android"] {
+                min-width: 290px !important;
+                width: 100% !important;
+            }
+            table[class="w600"] {
+                width: 320px !important;
+            }
+            td[class*="free-text"] {
+                padding: 10px 20px 24px !important;
+            }
+            td[class="header-lg"] {
+                font-size: 24px !important;
+                line-height: 30px !important;
+            }
+        }
+    </style>
+</head>
+<body>
+<table align="center" cellpadding="0" cellspacing="0" class="container-for-gmail-android" width="100%">
+    <tr>
+        <td align="center" bgcolor="#f6f6f6" width="100%">
+            <table cellpadding="0" cellspacing="0" class="w600" width="600">
+                <tr>
+                    <td align="center" style="padding: 28px 0 14px;">
+                        <img alt="Arachnodex" src="{{logoDataUri}}" width="96" style="display: block; width: 96px; height: auto;" />
+                    </td>
+                </tr>
+            </table>
+
+            <table bgcolor="#ffffff" cellpadding="0" cellspacing="0" class="w600" width="600">
+                <tr>
+                    <td class="header-lg">{{#if fatalOnly}}Fatal Error Report{{else}}Crawler Error Report{{/if}}</td>
+                </tr>
+                <tr>
+                    <td class="free-text">
+                        <strong>{{siteName}}</strong><br />
+                        <a href="{{baseUrl}}">{{baseUrl}}</a><br />
+                        Generated {{generatedAt}} after {{durationSeconds}} seconds.
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 0 20px 24px;">
+                        <table cellpadding="0" cellspacing="0" width="100%">
+                            <tr>
+                                <td class="mini-block" width="32%">
+                                    <div class="stat-label">Errors</div>
+                                    <div class="stat-value">{{errorCount}}</div>
+                                </td>
+                                <td width="2%">&nbsp;</td>
+                                <td class="mini-block" width="32%">
+                                    <div class="stat-label">Scraped</div>
+                                    <div class="stat-value">{{stats.totals.pagesScraped}}</div>
+                                </td>
+                                <td width="2%">&nbsp;</td>
+                                <td class="mini-block" width="32%">
+                                    <div class="stat-label">Jobs</div>
+                                    <div class="stat-value">{{jobCount}}</div>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 0 20px 28px;">
+                        {{#each errors}}
+                            <table cellpadding="0" cellspacing="0" width="100%" style="border: 1px solid #e5e5e5; border-radius: 5px; margin-bottom: 18px;">
+                                <tr>
+                                    <td style="padding: 16px 18px 8px; text-align: left;">
+                                        <div style="color: {{#if fatal}}#b42318{{else}}#b54708{{/if}}; font-size: 18px; font-weight: 700; line-height: 24px;">{{index}}. {{{messageHtml}}}</div>
+                                        <div style="color: #999999; font-size: 12px; padding-top: 2px;">{{#if fatal}}Fatal{{else}}Nonfatal{{/if}} · {{errorName}}</div>
+                                    </td>
+                                </tr>
+                                {{#if errorMessage}}
+                                    <tr>
+                                        <td style="padding: 0 18px 10px; color: #777777; text-align: left;">
+                                            {{{errorMessageHtml}}}
+                                        </td>
+                                    </tr>
+                                {{/if}}
+                                {{#if locationDetails.length}}
+                                    <tr>
+                                        <td style="padding: 0 18px 14px;">
+                                            <table cellpadding="0" cellspacing="0" width="100%">
+                                                {{#each locationDetails}}
+                                                    <tr>
+                                                        <td style="border-top: 1px solid #eeeeee; color: #4d4d4d; font-weight: 700; padding: 7px 0; text-align: left; width: 34%;">{{label}}</td>
+                                                        <td style="border-top: 1px solid #eeeeee; color: #777777; padding: 7px 0; text-align: left; word-break: break-word;">{{{valueHtml}}}</td>
+                                                    </tr>
+                                                {{/each}}
+                                            </table>
+                                        </td>
+                                    </tr>
+                                {{/if}}
+                                {{#if stack}}
+                                    <tr>
+                                        <td style="padding: 0 18px 16px;">
+                                            <pre style="white-space: pre-wrap; word-break: break-word; margin: 0; padding: 10px; background: #fbfbfb; border: 1px solid #eeeeee; color: #555555; font-size: 11px; line-height: 16px; font-family: Consolas, Monaco, monospace;">{{{stackHtml}}}</pre>
+                                        </td>
+                                    </tr>
+                                {{/if}}
+                            </table>
+                        {{/each}}
+                    </td>
+                </tr>
+            </table>
+
+            <table cellpadding="0" cellspacing="0" class="w600" width="600">
+                <tr>
+                    <td class="footer">
+                        Powered by Arachnodex. {{jobCount}} loaded job(s): {{jobNames}}
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html>

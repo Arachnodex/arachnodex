@@ -1,0 +1,89 @@
+{
+  "name": "@arachnodex/core",
+  "version": "1.0.0",
+  "description": "Arachnodex core crawler runtime, shared APIs, and CLI.",
+  "main": "bin/index.js",
+  "bin": {
+    "arachnodex": "./bin/index.js"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./bin/index.js"
+    },
+    "./config/default.example.json": {
+      "default": "./config/default.example.json"
+    }
+  },
+  "files": [
+    "config/*.example.json",
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
+    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\"",
+    "lint": "eslint ./src/*.ts ./src/**/*.ts",
+    "fix": "eslint ./src/**/*.ts --fix",
+    "lint:watch": "chokidar src/*.ts src/jobs/*.ts -c \"npm run lint\" --initial --verbose",
+    "crawl": "node bin/index.js",
+    "crawl:src": "node --conditions=development --import tsx src/index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arachnodex/arachnodex.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "arachnodex",
+    "crawler",
+    "cli",
+    "sitemap generator",
+    "404 finder",
+    "bad link checker",
+    "website spider"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Rick Kukiela <rick@belniakmedia.com>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Arachnodex/arachnodex/issues"
+  },
+  "homepage": "https://github.com/Arachnodex/arachnodex#readme",
+  "dependencies": {
+    "@arachnodex/bot-protection-heuristics": "^1.0.0",
+    "@arachnodex/job-link-issues": "^1.0.0",
+    "@arachnodex/job-sitemap": "^1.0.0",
+    "axios": "^1.12.2",
+    "chalk": "^5.6.2",
+    "deepmerge-ts": "^1.1.5",
+    "eventemitter3": "^4.0.7",
+    "fs-extra": "^11.3.2",
+    "handlebars": "^4.7.8",
+    "jsdom": "^22.1.0",
+    "nodemailer": "^6.10.1"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/jsdom": "^27.0.0",
+    "@types/node": "^22",
+    "@types/nodemailer": "^6.4.21",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "chokidar": "^4.0.3",
+    "chokidar-cli": "^3.0.0",
+    "esbuild": "^0.25.0",
+    "eslint": "^8.57.1",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25"
+  }
+}

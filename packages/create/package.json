@@ -1,0 +1,51 @@
+{
+  "name": "@arachnodex/create",
+  "version": "1.0.0",
+  "description": "Create an Arachnodex crawler project.",
+  "type": "module",
+  "main": "bin/index.js",
+  "bin": {
+    "create": "./bin/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arachnodex/arachnodex.git",
+    "directory": "packages/create"
+  },
+  "keywords": [
+    "arachnodex",
+    "crawler",
+    "create",
+    "scaffold"
+  ],
+  "author": "Rick Kukiela <rick@belniakmedia.com>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Arachnodex/arachnodex/issues"
+  },
+  "homepage": "https://github.com/Arachnodex/arachnodex#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
+    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\""
+  },
+  "dependencies": {
+    "@arachnodex/core": "^1.0.0",
+    "@arachnodex/job-link-issues": "^1.0.0",
+    "@arachnodex/job-sitemap": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25"
+  }
+}

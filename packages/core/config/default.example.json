@@ -1,0 +1,34 @@
+{
+  "siteName": "Example Site",
+  "domain": "example.com",
+  "baseUrl": "https://www.example.com",
+  "pathPrefix": "",
+  "entryFile": "",
+  "dontResetUrls": false,
+  "numThreads": 10,
+  "requestDelayMs": 0,
+  "requestTimeoutMs": 30000,
+  "requestTimeoutMaxRetries": 3,
+  "muteResponseStatus": false,
+  "muteAll": false,
+  "disableColorOutput": false,
+  "urlCantContain": [],
+  "urlMustContain": [],
+  "treatHashAsUniquePage": false,
+  "mail": {
+    "disabled": true,
+    "defaultSubject": "Arachnodex {{domain}} Report [{{jobs}}]",
+    "developerRecipients": [],
+    "reportRecipients": [],
+    "errorRecipients": [],
+    "from": {
+      "Arachnodex Spider": "noreply@example.com"
+    },
+    "replyTo": [],
+    "transport": {
+      "host": "127.0.0.1",
+      "port": "1025",
+      "secure": false
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "name": "@arachnodex/job-link-issues",
+  "version": "1.0.0",
+  "description": "Arachnodex job for reporting crawl link issues.",
+  "type": "module",
+  "main": "bin/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./bin/index.js"
+    },
+    "./config/link-issues.example.json": "./config/link-issues.example.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arachnodex/arachnodex.git",
+    "directory": "packages/job-link-issues"
+  },
+  "keywords": [
+    "arachnodex",
+    "crawler",
+    "broken links",
+    "link checker",
+    "seo"
+  ],
+  "author": "Rick Kukiela <rick@belniakmedia.com>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Arachnodex/arachnodex/issues"
+  },
+  "homepage": "https://github.com/Arachnodex/arachnodex#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "config/*.example.json",
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
+    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.12.2"
+  },
+  "peerDependencies": {
+    "@arachnodex/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@arachnodex/core": "^1.0.0",
+    "@types/node": "^22",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25"
+  }
+}

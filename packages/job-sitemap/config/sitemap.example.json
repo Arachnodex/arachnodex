@@ -1,0 +1,7 @@
+{
+  "includeOnlyCanonical": true,
+  "includeDocs": true,
+  "emailReportEnabled": true,
+  "outputFile": "../web/sitemap.xml",
+  "includeDocPattern": "((x-)?pdf)|(ms-?excel)|(vnd.)|(ms-?word)|(ms-?powerpoint)|(ms-?access)|(download)"
+}

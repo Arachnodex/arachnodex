@@ -1,0 +1,62 @@
+{
+  "name": "@arachnodex/job-sitemap",
+  "version": "1.0.0",
+  "description": "Arachnodex job for generating crawl sitemaps.",
+  "type": "module",
+  "main": "bin/index.js",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./bin/index.js"
+    },
+    "./config/sitemap.example.json": "./config/sitemap.example.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Arachnodex/arachnodex.git",
+    "directory": "packages/job-sitemap"
+  },
+  "keywords": [
+    "arachnodex",
+    "crawler",
+    "sitemap",
+    "sitemap generator",
+    "seo"
+  ],
+  "author": "Rick Kukiela <rick@belniakmedia.com>",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/Arachnodex/arachnodex/issues"
+  },
+  "homepage": "https://github.com/Arachnodex/arachnodex#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "config/*.example.json",
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
+    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "fs-extra": "^11.3.2"
+  },
+  "peerDependencies": {
+    "@arachnodex/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@arachnodex/core": "^1.0.0",
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^22",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=24.16.0 <25"
+  }
+}
