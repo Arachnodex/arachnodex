@@ -163,6 +163,136 @@ npm exec -- arachnodex -c default -j link-issues -c link-issues
 
 That loads the crawler config from `config/default.json` and the link issue job config from `config/link-issues.json`.
 
+## Core Config Settings
+
+Core crawler config files live in `config/`. The default run loads:
+
+```text
+config/default.json
+```
+
+Projects created with `npm create @arachnodex` start from the core example config shipped at:
+
+```text
+packages/core/config/default.example.json
+```
+
+Full example:
+
+```json
+{
+  "siteName": "Example Site",
+  "domain": "example.com",
+  "baseUrl": "https://www.example.com",
+  "pathPrefix": "",
+  "entryFile": "",
+  "dontResetUrls": false,
+  "numThreads": 10,
+  "requestDelayMs": 0,
+  "requestTimeoutMs": 30000,
+  "requestTimeoutMaxRetries": 3,
+  "requestTls": {
+    "rejectUnauthorized": true
+  },
+  "muteResponseStatus": false,
+  "muteAll": false,
+  "disableColorOutput": false,
+  "urlCantContain": [],
+  "urlMustContain": [],
+  "treatHashAsUniquePage": false,
+  "mail": {
+    "disabled": true,
+    "defaultSubject": "Arachnodex {{domain}} Report [{{jobs}}]",
+    "developerRecipients": [],
+    "reportRecipients": [],
+    "errorRecipients": [],
+    "from": {
+      "Arachnodex Spider": "noreply@example.com"
+    },
+    "replyTo": [],
+    "transport": {
+      "host": "127.0.0.1",
+      "port": "1025",
+      "secure": false
+    }
+  }
+}
+```
+
+### Site Settings
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `siteName` | string | `""` | Human-readable site name used in reports. |
+| `domain` | string | `""` | Canonical hostname without `www.`. For example, use `example.com`, not `www.example.com`. |
+| `baseUrl` | string | `""` | Root crawl URL. Must be a valid `http://` or `https://` URL with no path, query string, or hash. The hostname must match `domain`, allowing only an optional leading `www.`. |
+| `pathPrefix` | string | `""` | Optional path prefix for crawls that should stay under a subdirectory. When set, Arachnodex also requires discovered URLs to contain the configured domain plus this prefix. |
+| `entryFile` | string | `""` | Optional entry path appended after `baseUrl` and `pathPrefix` for the first URL queued by the crawler. |
+| `dontResetUrls` | boolean | `false` | Leave internal URLs on their discovered protocol and host instead of normalizing them back to `baseUrl`. Most projects should keep this `false`. |
+
+### Crawl Settings
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `numThreads` | number | `10` | Maximum number of concurrent crawler workers. Values lower than `1` are treated as `1`. |
+| `requestDelayMs` | number | `0` | Delay in milliseconds before crawler requests. |
+| `requestTimeoutMs` | number | `30000` | Per-request timeout in milliseconds. |
+| `requestTimeoutMaxRetries` | number | `3` | Maximum retry attempts for timeout failures. |
+| `requestTls.rejectUnauthorized` | boolean | `true` | Verify HTTPS certificates for crawler requests and job requests that use the core request TLS setting. Set to `false` only when intentionally crawling a site with an invalid certificate. |
+| `treatHashAsUniquePage` | boolean | `false` | Keep URL fragments as part of the crawled URL identity. By default, fragments are stripped so `/page#one` and `/page#two` are treated as the same page. |
+
+### Filtering Settings
+
+`urlCantContain` and `urlMustContain` are arrays of regular expression strings.
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `urlCantContain` | string[] | `[]` | Reject discovered URLs that match any listed pattern. |
+| `urlMustContain` | string[] | `[]` | Reject discovered URLs unless every listed pattern matches. |
+
+### Output Settings
+
+These values can be set in config or overridden by core switches.
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `muteResponseStatus` | boolean | `false` | Mute crawler response status output. Job output and errors still print. |
+| `muteAll` | boolean | `false` | Mute all non-error output, including job output. |
+| `disableColorOutput` | boolean | `false` | Disable ANSI color output. |
+
+### Mail Settings
+
+Mail is disabled by default. Enable it by setting `mail.disabled` to `false` and configuring recipients plus transport settings.
+
+Recipient lists use name-to-email maps:
+
+```json
+[
+  {"Jane Developer": "jane@example.com"}
+]
+```
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mail.disabled` | boolean | `true` | Disable regular and error report emails. |
+| `mail.defaultSubject` | string | `"Arachnodex {{domain}} Report [{{jobs}}]"` | Subject template for report emails. Supports `{{domain}}` and `{{jobs}}`. |
+| `mail.developerRecipients` | object[] | `[]` | Developer recipients that can receive crawler reports. |
+| `mail.reportRecipients` | object[] | `[]` | Recipients for regular completion reports. |
+| `mail.errorRecipients` | object[] | `[]` | Recipients for accumulated error reports. |
+| `mail.from` | object | `{}` | Sender name-to-email map. |
+| `mail.replyTo` | object[] | `[]` | Reply-to recipient maps. |
+
+Mail transport settings are passed to Nodemailer.
+
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mail.transport.host` | string | `""` | SMTP host. |
+| `mail.transport.port` | number or string | `465` | SMTP port. |
+| `mail.transport.secure` | boolean | `true` | Use TLS for the SMTP connection. Local Mailpit/MailHog setups commonly use `false`. |
+| `mail.transport.auth.username` | string | `""` | Optional SMTP username. |
+| `mail.transport.auth.password` | string | `""` | Optional SMTP password. |
+| `mail.transport.tls.rejectUnauthorized` | boolean | `true` | Verify SMTP TLS certificates when TLS is used. |
+
 ## Core Switches
 
 Core switches may be used before the first job:
@@ -185,87 +315,19 @@ Core switches may be used before the first job:
 
 ## Official Jobs
 
+Official jobs are regular job packages. They install by default through the create workflow, and they can also be installed or updated individually.
+
 ### Sitemap
 
-Package:
+`@arachnodex/job-sitemap` writes an XML sitemap from crawlable internal URLs found during a crawl. It can include canonical HTML pages and optionally include document URLs such as PDFs.
 
-```text
-@arachnodex/job-sitemap
-```
-
-Run it:
-
-```sh
-npm exec -- arachnodex -c default -j sitemap
-```
-
-The sitemap job writes a sitemap from crawlable internal URLs found during the crawl. Its example config is:
-
-```json
-{
-  "includeOnlyCanonical": true,
-  "includeDocs": true,
-  "emailReportEnabled": true,
-  "outputFile": "../web/sitemap.xml",
-  "includeDocPattern": "((x-)?pdf)|(ms-?excel)|(vnd.)|(ms-?word)|(ms-?powerpoint)|(ms-?access)|(download)"
-}
-```
-
-`outputFile` is resolved from the Arachnodex project directory where you run the crawler. The default assumes a sibling website document root at `../web`, so a project at `site-audit/` writes the public sitemap to `web/sitemap.xml` beside it.
-
-Sitemap job switch:
-
-| Switch | Description |
-| --- | --- |
-| `-v`, `--version` | Print the Sitemap job version and exit without crawling. |
+Read the [Sitemap job README](packages/job-sitemap/README.md) for install notes, usage examples, switches, and full job config settings.
 
 ### Link Issues
 
-Package:
+`@arachnodex/job-link-issues` reports broken, malformed, non-canonical, insecure, placeholder, redirect, fragment, and optional external-link issues. External checks use the bot protection heuristics package to avoid false positives from common WAF, CAPTCHA, and browser-challenge responses.
 
-```text
-@arachnodex/job-link-issues
-```
-
-Run it:
-
-```sh
-npm exec -- arachnodex -c default -j link-issues
-```
-
-Run it with external link checks and notice-level findings:
-
-```sh
-npm exec -- arachnodex -c default -j link-issues -e -n
-```
-
-Run it with copy/paste prompt output:
-
-```sh
-npm exec -- arachnodex -c default -j link-issues -p
-```
-
-The link issue job reports broken, malformed, non-canonical, insecure, placeholder, redirect, fragment, and optional external-link issues. When external checks are enabled with `-e`, it uses the bot protection heuristics package to recognize common WAF, CAPTCHA, and browser-challenge responses. Those responses are treated as inconclusive instead of broken because many third-party sites block automated HEAD/GET checks while still serving normal browsers.
-
-Its example config is:
-
-```json
-{
-  "emailReportEnabled": true,
-  "emailReportTriggerLevels": ["error", "warning", "notice"],
-  "undesirablePathCharacterPattern": "[^\\w\\-/.]",
-  "allowedNonCanonicalLinks": []
-}
-```
-
-Link issue job switches:
-
-| Switch | Description |
-| --- | --- |
-| `-V`, `--version` | Print the Link Issues job version and exit without crawling. |
-| `-n`, `--include-notices` | Include notice-level findings. By default, only errors and warnings render. |
-| `-e`, `--include-external` | Check external links using HEAD requests with limited fallback behavior. |
-| `-p`, `--prompt` | Output grouped findings as copy/paste prompts for another coding agent. |
+Read the [Link Issues job README](packages/job-link-issues/README.md) for install notes, usage examples, switches, finding severities, bot-protection behavior, and full job config settings.
 
 ## Updating Individual Packages
 
