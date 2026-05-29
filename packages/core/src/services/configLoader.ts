@@ -27,6 +27,12 @@ function assertAppConfig(v: unknown): asserts v is AppConfig {
     if (typeof v.requestDelayMs !== 'undefined' && typeof v.requestDelayMs !== 'number') throw new Error('requestDelayMs must be number');
     if (typeof v.requestTimeoutMs !== 'undefined' && typeof v.requestTimeoutMs !== 'number') throw new Error('requestTimeoutMs must be number');
     if (typeof v.requestTimeoutMaxRetries !== 'undefined' && typeof v.requestTimeoutMaxRetries !== 'number') throw new Error('requestTimeoutMaxRetries must be number');
+    if (typeof v.requestTls !== 'undefined') {
+        if (!isRecord(v.requestTls)) throw new Error('requestTls must be object');
+        if (typeof v.requestTls.rejectUnauthorized !== 'boolean') {
+            throw new Error('requestTls.rejectUnauthorized must be boolean');
+        }
+    }
     if (typeof v.muteResponseStatus !== 'undefined' && typeof v.muteResponseStatus !== 'boolean') throw new Error('muteResponseStatus must be boolean');
     if (typeof v.muteAll !== 'undefined' && typeof v.muteAll !== 'boolean') throw new Error('muteAll must be boolean');
     if (typeof v.disableColorOutput !== 'undefined' && typeof v.disableColorOutput !== 'boolean') throw new Error('disableColorOutput must be boolean');
@@ -94,6 +100,9 @@ class ConfigLoader {
             requestDelayMs: 0,
             requestTimeoutMs: 30000,
             requestTimeoutMaxRetries: 3,
+            requestTls: {
+                rejectUnauthorized: true
+            },
             muteResponseStatus: false,
             muteAll: false,
             disableColorOutput: false,
@@ -117,7 +126,7 @@ class ConfigLoader {
                         password: ""
                     },
                     tls: {
-                        "rejectUnauthorized": false
+                        "rejectUnauthorized": true
                     }
                 }
             }
@@ -143,6 +152,10 @@ class ConfigLoader {
             let appConfig = {
                 ...defaults,
                 ...fileCfg,
+                requestTls: {
+                    ...defaults.requestTls,
+                    ...(isRecord(fileCfg.requestTls) ? fileCfg.requestTls : {})
+                },
                 mail: {
                     ...defaults.mail,
                     ...fileMail,

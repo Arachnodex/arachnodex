@@ -7,6 +7,8 @@ import type {FileHandle} from 'fs/promises';
 import {BaseJob, ConfigService, eventBus, type JobCommandParser, type Profiler} from "@arachnodex/core";
 import {open} from 'fs/promises'
 import fse from 'fs-extra'
+import {tmpdir} from "os";
+import {join} from "path";
 import {StreamWriter} from "./streamWriter.js";
 export {default as CommandParser} from "./cmd.js";
 
@@ -26,8 +28,8 @@ export default class Sitemap extends BaseJob {
 
     // Temp files keep page URLs and document URLs separate until final XML assembly.
     configRequired = true;
-    pageWriterFile = './sitemap-pages.tmp';
-    docWriterFile = './sitemap-docs.tmp';
+    pageWriterFile = '';
+    docWriterFile = '';
 
     // Writer objects for the two files listed above.
     pageWriter?: StreamWriter;
@@ -68,7 +70,10 @@ export default class Sitemap extends BaseJob {
 
     onInit() {
 
-        // todo settings for update frequency and priority + rule sets for both.
+        const tempId = `${process.pid}-${Date.now()}-${this.handle.replace(/[^a-z0-9-]/gi, '-')}`;
+        this.pageWriterFile = join(tmpdir(), `arachnodex-sitemap-pages-${tempId}.tmp`);
+        this.docWriterFile = join(tmpdir(), `arachnodex-sitemap-docs-${tempId}.tmp`);
+
         // Start every run with clean temp files so a failed previous crawl cannot leak
         // stale URLs into the next sitemap.
         if (fse.pathExistsSync(this.pageWriterFile)) {
@@ -88,19 +93,20 @@ export default class Sitemap extends BaseJob {
 
     }
 
-    getLastModifiedHeader(r: AxiosResponse): string
+    getLastModifiedHeader(r: AxiosResponse | null): string
     {
-        const lmHeader:unknown = r.headers['last-modified'] ?? '';
+        const lmHeader:unknown = r?.headers['last-modified'] ?? '';
         return String(lmHeader);
     }
 
-    onHeadersReceived(_response: AxiosResponse, _location: Location) {
+    onHeadersReceived(_response: AxiosResponse | null, _location: Location) {
 
         // Non-HTML files are not usually downloaded, so add matching documents here if the
         // mime type matches our includeDocPattern and includeDocs is enabled in the settings.
         // The loggedUrls check prevents duplicate entries if another path sees the same URL.
 
         // Guard clause - Only process success status codes if include docs is enabled.
+        if(_response === null) { return; }
         if(!this.includeDocs || _response.status < 200 || _response.status >= 300) return;
 
         let contentTypes:unknown = _response.headers['content-type'] ?? '';
@@ -112,7 +118,8 @@ export default class Sitemap extends BaseJob {
 
 
 
-    onPageReceived(_response: AxiosResponse, _pageData: PageData) {
+    onPageReceived(_response: AxiosResponse | null, _pageData: PageData) {
+        if(_response === null) { return; }
 
         // Content Type Guard Clause
         if (!_pageData.contentType.match(/text\/html/)) return;
@@ -149,10 +156,10 @@ export default class Sitemap extends BaseJob {
         // log url so it's not written again
         this.loggedUrls.push(location.url);
 
-        const lmDate = lastModifiedHeader !== '' ? new Date(lastModifiedHeader) : new Date();
+        const lmDate = this.getLastModifiedDate(lastModifiedHeader);
 
         // Escape XML-sensitive characters in the URL before writing the sitemap entry.
-        const cleanedUrl = location.url.replace(/&/g, '&amp;');
+        const cleanedUrl = this.escapeXml(location.url);
 
         const entry = '\n\t' + '<url><loc>' + cleanedUrl + '</loc><lastmod>' + lmDate.toISOString() + '</lastmod></url>';
 
@@ -164,6 +171,24 @@ export default class Sitemap extends BaseJob {
             this.pageUrlCount++;
             this.pageWriter?.write(entry);
         }
+    }
+
+    private getLastModifiedDate(lastModifiedHeader: string): Date {
+        if(lastModifiedHeader === '') {
+            return new Date();
+        }
+
+        const parsedDate = new Date(lastModifiedHeader);
+        return Number.isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+    }
+
+    private escapeXml(value: string): string {
+        return value
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&apos;');
     }
 
     getReportMessage(): string {

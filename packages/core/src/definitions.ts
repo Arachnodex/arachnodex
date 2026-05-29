@@ -26,6 +26,10 @@ export interface MailTransportConfig extends JSONObject {
     tls?: MailTransportTLS;
 }
 
+export interface RequestTlsConfig extends JSONObject {
+    rejectUnauthorized: boolean;
+}
+
 export interface MailConfig {
     disabled: boolean;
     defaultSubject: string;
@@ -48,6 +52,7 @@ export interface AppConfig {
     requestDelayMs: number;
     requestTimeoutMs: number;
     requestTimeoutMaxRetries: number;
+    requestTls: RequestTlsConfig;
     muteResponseStatus: boolean;
     muteAll: boolean;
     disableColorOutput: boolean;

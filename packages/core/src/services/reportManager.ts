@@ -136,7 +136,7 @@ export class ReportManager {
                 password: ""
             },
             tls: {
-                rejectUnauthorized: false
+                rejectUnauthorized: true
             }
         };
         transportConfig = ConfigService.getConfigValue('mail.transport', null, transportConfig);

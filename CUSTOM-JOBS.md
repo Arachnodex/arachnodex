@@ -94,7 +94,7 @@ Example `package.json` for a scoped third-party job:
     "typescript": "^5.6.3"
   },
   "engines": {
-    "node": ">=24.16.0 <25"
+    "node": ">=22.13.0 <25"
   }
 }
 ```
@@ -192,7 +192,7 @@ export default class ContentAuditJob extends BaseJob {
   }
 
   onEnd(): void {
-    this.completed = true;
+    // Optional cleanup or end-of-run reporting work.
   }
 
   getReportTitle(): string {
@@ -240,7 +240,7 @@ Report methods used by the email/report system:
 | `getReportHtml()` | Full HTML section for the job. |
 | `shouldSendEmailReport()` | Controls whether this job contributes email output. |
 
-Set `this.completed = true` when your job is done. If `onEnd()` starts async work, return a promise and mark the job complete when the work is finished.
+Arachnodex marks a job complete after `onEnd()` returns. If `onEnd()` starts async work, return a promise so the crawler can wait for that work before finishing shutdown.
 
 ## Job Command Switches
 

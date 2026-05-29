@@ -177,6 +177,10 @@ const reportGroupOrder = [
     'Placeholder Links'
 ];
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export default class LinkIssues extends BaseJob {
 
     name = "Link Issue Report";
@@ -1961,7 +1965,7 @@ export default class LinkIssues extends BaseJob {
             httpsAgent: new https.Agent({
                 timeout: externalCheckTimeoutMs,
                 requestCert: false,
-                rejectUnauthorized: false
+                rejectUnauthorized: ConfigService.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
             })
         };
 
@@ -2409,7 +2413,7 @@ export default class LinkIssues extends BaseJob {
         });
 
         const basePath = this.baseUrl.replace(/\/+$/, '');
-        const pattern = new RegExp(`^${basePath}`);
+        const pattern = new RegExp(`^${escapeRegExp(basePath)}`);
         if(pageData.location.url !== normalizedCanonical
             && this.allowedNonCanonicalLinks.indexOf(normalizedCanonical.replace(pattern, '')) === -1) {
             this.nonCanonicalTargets.add(pageData.location.url);

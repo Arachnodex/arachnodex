@@ -3,11 +3,14 @@
 import type {Location} from "../definitions.ts";
 import {ConfigService} from "./configLoader.js";
 
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 class _urlHelper {
 
     baseUrl = '';
     domain = '';
-    validator: RegExp = /^$/;
     urlCantContain: RegExp[] = [];
     urlMustContain: RegExp[] = [];
     dontResetUrls = false;
@@ -17,18 +20,17 @@ class _urlHelper {
     loadConfig(): void {
 
         // populate locally needed config data as props
-        this.baseUrl = ConfigService.getConfigString('baseUrl');
+        this.baseUrl = ConfigService.getConfigString('baseUrl').replace(/\/+$/, '');
         this.domain = ConfigService.getConfigString('domain');
         this.urlCantContain = ConfigService.getConfigRegExArray('urlCantContain');
         this.urlMustContain = ConfigService.getConfigRegExArray('urlMustContain');
-        this.validator = new RegExp('^(//|https?://)([wW]{3}\\.)?' + this.domain);
         this.dontResetUrls = ConfigService.getConfigBoolean('dontResetUrls');
         this.treatHashAsUniquePage = ConfigService.getConfigBoolean('treatHashAsUniquePage');
 
         // Force path prefix if provided
         const prefix = ConfigService.getConfigString('pathPrefix');
         if(prefix !== '') {
-            this.urlMustContain.push(new RegExp(this.domain + prefix));
+            this.urlMustContain.push(new RegExp(escapeRegExp(this.domain + prefix)));
         }
 
         this.initialized = true;
@@ -80,6 +82,8 @@ class _urlHelper {
     prepareUrl(location: Location): boolean {
         this.ensureConfigLoaded();
 
+        location.url = location.url.trim();
+
         // remove and store URL hash and query string data if present
         this.assignUrlSegment(location)
 
@@ -95,65 +99,23 @@ class _urlHelper {
             }
         }
 
-        //todo implement following at least basic javascript onclick links?
-
-        // Handle full https:// style links. Return false if domain
-        // does not match, other wise reset the URL and return true.
-        if (location.url.match(/^\/\/|^https?:\/\//)) {
-
-            // Accept as internal if starts by matching our base url validation pattern
-            if (location.url.match(this.validator)) {
-                this.resetUrl(location);
-                return true;
-            }
-
-            // Off-site link :(
+        if(!this.isWebLink(location.url)) {
             return false;
         }
 
-        // Do not follow "protocol" links like mailto:, tel:, ftp://, etc.
-        if (location.url.match(/^[^.]*:/)) {
-            return false
+        const base = location.referer ?? location.redirectedFrom ?? this.getDocumentRootBase();
+        let parsed: URL;
+        try {
+            parsed = new URL(location.url, base);
+        } catch {
+            return false;
         }
 
-        // Allow absolute path outright
-        if (location.url.match(/^\//)) {
-            this.resetUrl(location);
-            return true;
+        if(!this.isHttpUrl(parsed) || !this.isInternalHostname(parsed.hostname)) {
+            return false;
         }
 
-
-        // Relative Path
-        // Assemble absolute URL based on the "directory" of the referring URL
-
-
-        // Make sure we have a valid variable to work with
-        const referer = location.referer ?? location.redirectedFrom ?? "";
-
-        // No referer so it must be relative to document root.
-        if (referer === "") {
-
-            location.url = "/" + location.url;
-
-        } else {
-
-            // URL Does not end in a slash so we must treat the last segment as a "file"
-            // We must remove the file segment and replace it with the new relative URL
-            // to properly emulate the behavior of the browser.
-            if (referer.substring(-1) !== '/') {
-                const referer_parts = referer.split('/');
-                referer_parts.pop();
-                location.url = (referer_parts.join('/') ?? "/").replace(/\/+$/, '') + '/' + location.url;
-            } else {
-                // URL Ends with a slash so the referring URL is treated
-                // as a directory in full and the new relative URL is appended
-                // directly to the referring URL.
-                location.url = referer + location.url;
-            }
-
-        }
-
-
+        location.url = parsed.href;
         this.resetUrl(location);
         return true;
     }
@@ -161,29 +123,19 @@ class _urlHelper {
     createLocationFromLink(link:string, currentLoc:Location): Location|null {
         this.ensureConfigLoaded();
 
-        if(this.isWebLink(link)) {
-            let fullUrl;
-            if (link.match(/^#/)) {
-                fullUrl = currentLoc.url + link;
-            } else if (link.match(/^\/\//)) {
-                fullUrl = new URL(link, this.baseUrl).href;
-            } else if (!link.match(/^https?:\/\//i)) {
-                if (link.match(/^\//)) {
-                    // Absolute path
-                    const base = this.baseUrl.trim().replace(/\/$/, '');
-                    fullUrl = `${base}${link}`;
-                } else {
-                    // Relative Path
-                    const base = currentLoc.url.trim().replace(/\/$/, '');
-                    fullUrl = `${base}/${link}`;
-                }
-            } else {
-                fullUrl = link;
+        const href = link.trim();
+        if(this.isWebLink(href)) {
+            let fullUrl: string;
+            try {
+                const baseUrl = currentLoc.url !== '' ? currentLoc.url : this.getDocumentRootBase();
+                fullUrl = new URL(href, baseUrl).href;
+            } catch {
+                return null;
             }
 
             return {
                 url: fullUrl,
-                rawUrl: fullUrl.replace(new RegExp('^' + this.baseUrl.replace(/\/$/i, '')), ''),
+                rawUrl: this.removeBaseUrl(fullUrl),
                 referer: currentLoc.url
 
             };
@@ -221,15 +173,19 @@ class _urlHelper {
         // Don't reset the URL if disabled in config
         if(this.dontResetUrls) { return; }
 
-        // Remove all protocol and host segments of the URL
-        // to reset to an absolute relative URL eg. "/contact" (adds slash if necessary)
-        location.url = location.url.replace(this.validator, "");
-        if (location.url.substring(0, 1) !== '/') {
-            location.url = '/' + location.url;
+        let parsed: URL;
+        try {
+            parsed = new URL(location.url, this.getDocumentRootBase());
+        } catch {
+            return;
+        }
+
+        if(!this.isInternalHostname(parsed.hostname)) {
+            return;
         }
 
         // Prepend base url to make it a FULL url eg "https://www.example.com/contact"
-        location.url = (this.baseUrl + location.url).trim();
+        location.url = `${this.baseUrl}${parsed.pathname}${parsed.search}${parsed.hash}`.trim();
     }
 
     // Removes either the hash or query string segment and stores them in the Location object
@@ -244,6 +200,36 @@ class _urlHelper {
         // const parts: string[] = location.url.split(character);
         // location.url = parts.shift() ?? "";
         // location[segment] = typeof parts[0] === 'string' ? parts[0] : "";
+    }
+
+    private getDocumentRootBase(): string {
+        return this.baseUrl.endsWith('/') ? this.baseUrl : `${this.baseUrl}/`;
+    }
+
+    private isHttpUrl(url: URL): boolean {
+        return url.protocol === 'http:' || url.protocol === 'https:';
+    }
+
+    private isInternalHostname(hostname: string): boolean {
+        return this.normalizeHostname(hostname) === this.normalizeHostname(this.domain);
+    }
+
+    private normalizeHostname(hostname: string): string {
+        return hostname.toLowerCase().replace(/^www\./, '');
+    }
+
+    private removeBaseUrl(url: string): string {
+        try {
+            const parsed = new URL(url);
+            const base = new URL(this.getDocumentRootBase());
+            if(parsed.protocol === base.protocol && this.normalizeHostname(parsed.hostname) === this.normalizeHostname(base.hostname)) {
+                return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+            }
+        } catch {
+            return url;
+        }
+
+        return url;
     }
 }
 

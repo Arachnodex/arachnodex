@@ -9,6 +9,9 @@
   "requestDelayMs": 0,
   "requestTimeoutMs": 30000,
   "requestTimeoutMaxRetries": 3,
+  "requestTls": {
+    "rejectUnauthorized": true
+  },
   "muteResponseStatus": false,
   "muteAll": false,
   "disableColorOutput": false,

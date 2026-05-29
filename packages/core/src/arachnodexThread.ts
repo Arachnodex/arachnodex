@@ -238,7 +238,7 @@ export class ArachnodexThread {
             }
             config.httpsAgent = new https.Agent({
                 requestCert: false,
-                rejectUnauthorized: false
+                rejectUnauthorized: ConfigService.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
             });
             if(typeof location.referer !== 'undefined' && location.referer !== null) {
                 config.headers = {

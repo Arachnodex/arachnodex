@@ -48,6 +48,8 @@ Prefer package-scoped changes. A fix to the sitemap job should usually stay in `
 
 Jobs should import public APIs from `@arachnodex/core`, not private files inside the core package. Shared standalone data or behavior that should be updateable independently can be its own package, like `@arachnodex/bot-protection-heuristics`.
 
+`@arachnodex/core` should stay independent from official job packages. The create package owns the default project install set, while core owns the runtime and job-loading contract.
+
 Published package metadata should use normal semver dependency ranges. Avoid committing local `file:` dependencies for packages that are meant to be published.
 
 ## Build Output

@@ -30,7 +30,7 @@ export abstract class BaseCommandParser implements CommandParserInterface {
             value: true,
             type: 'string',
             label: 'job-name|package',
-            description: `Specify a job to run. Short names load bundled-style packages, e.g. 'example' loads` +
+            description: `Specify a job to run. Short names load official-style packages, e.g. 'example' loads` +
                 ` @arachnodex/job-example. Scoped package names load exactly, e.g. @scope/job-example.` +
                 ` Use npm:package-name for exact unscoped third-party packages.`,
             note: `When multiple jobs are supplied, each job receives the switches after its name until the next job switch.`
@@ -273,10 +273,19 @@ export abstract class BaseCommandParser implements CommandParserInterface {
     }
 
     private validateSwitchInput(argument: ArgumentConfig, value: string): void {
-        const inputType = value.match(/^\d+$/) ? 'number' : 'string';
+        if(argument.type === 'number') {
+            const numericValue = Number(value);
+            if(!Number.isFinite(numericValue)) {
+                throw new Error(`The value set for switch '${argument.switch}' requires a <number> type.`);
+            }
+            if(argument.switch === '-t' && (!Number.isInteger(numericValue) || numericValue < 1)) {
+                throw new Error(`The value set for switch '${argument.switch}' requires a positive integer.`);
+            }
+            return;
+        }
 
-        if(inputType !== argument.type) {
-            throw new Error(`The value set for switch '${argument.switch}' requires a <${argument.type}> type.`);
+        if(argument.type === 'string' && value === '') {
+            throw new Error(`The value set for switch '${argument.switch}' requires a non-empty <string> value.`);
         }
     }
 

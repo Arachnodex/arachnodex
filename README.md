@@ -2,18 +2,18 @@
 
 Arachnodex is a modular Node.js web crawler framework. It spiders a configured site, parses page data, and runs one or more installed jobs during the crawl.
 
-The default package set includes a sitemap job, a link issue reporting job, and a small bot protection heuristics package that can be updated independently from the crawler core.
+The create workflow installs the core crawler, a sitemap job, a link issue reporting job, and a small bot protection heuristics package that can be updated independently.
 
 ## Requirements
 
-- Node.js `24.16.0` or newer within Node 24.
+- Node.js `22.13.0` or newer, including Node 24.
 - npm `11.13.0` or compatible.
 
-The repo includes an `.nvmrc` for contributors who use nvm.
+The repo includes an `.nvmrc` for contributors who use nvm. CI checks Node 22 and Node 24 so changes stay compatible with the supported range.
 
 ## Custom Jobs
 
-Arachnodex can load your own job packages in addition to the bundled jobs. A job is an npm package with a default class export. Official shorthand such as `-j sitemap` resolves to `@arachnodex/job-sitemap`, while third-party scoped packages can be loaded by their full package name.
+Arachnodex can load your own job packages in addition to the official jobs. A job is an npm package with a default class export. Official shorthand such as `-j sitemap` resolves to `@arachnodex/job-sitemap`, while third-party scoped packages can be loaded by their full package name.
 
 Custom jobs can be published to npm, installed from a private registry, or installed from a local filesystem path while you are developing private code.
 
@@ -33,7 +33,7 @@ cd my-crawl-project
 npm run crawl
 ```
 
-That initializes a runnable project with local `package.json`, `config/`, `src/`, and `bin/` directories, installs the core crawler and bundled jobs, and adds `crawl` and `crawl:src` scripts.
+That initializes a runnable project with local `package.json`, `config/`, `src/`, and `bin/` directories, installs the core crawler and official jobs, and adds `crawl` and `crawl:src` scripts.
 
 You can skip automatic install if you want to inspect or edit files first:
 
@@ -47,10 +47,21 @@ You can also install the CLI globally:
 
 ```sh
 npm install -g @arachnodex/core
+npm install -g @arachnodex/job-sitemap @arachnodex/job-link-issues
 arachnodex -c default -j sitemap -j link-issues
 ```
 
-The global install works for the core CLI. For project work, prefer the create command or a local project install so config, job versions, and output files live with the site audit project.
+The global install works for the core CLI, but core does not include job packages. Install the jobs you want alongside it so shorthand names such as `sitemap` and `link-issues` can resolve.
+
+For project work, prefer the create command or a local project install so config, job versions, and output files live with the site audit project.
+
+For a minimal manual local install, add core and only the jobs you need:
+
+```sh
+npm install @arachnodex/core
+npm install @arachnodex/job-sitemap
+npm exec -- arachnodex -c default -j sitemap
+```
 
 ## Basic Usage
 
@@ -74,19 +85,35 @@ A minimal config looks like this:
 }
 ```
 
+Crawler HTTPS certificate verification is enabled by default. If you intentionally need to crawl a staging or client site with an invalid certificate, opt out in config:
+
+```json
+{
+  "requestTls": {
+    "rejectUnauthorized": false
+  }
+}
+```
+
 Projects created with `npm create @arachnodex` include a local `crawl` script:
 
 ```sh
 npm run crawl
 ```
 
-They also include a source-mode runner for custom job development:
+Generated projects also include a source-mode runner for custom job development:
 
 ```sh
 npm run crawl:src
 ```
 
-The source-mode script uses `tsx` and Node's `development` export condition. It runs core and compatible job packages from TypeScript source instead of their built `bin/` files.
+In this monorepo, use the root `crawl-dev` script for the same source-mode workflow:
+
+```sh
+npm run crawl-dev -- -j link-issues -n -e -p
+```
+
+`crawl-dev` wraps `npm --workspace @arachnodex/core run crawl:src --`, so anything after `--` is passed through to the crawler. The underlying `crawl:src` script uses `tsx` and Node's `development` export condition to run core and compatible job packages from TypeScript source instead of their built `bin/` files.
 
 For local installs, run custom commands through npm so it can find the local `node_modules/.bin/arachnodex` executable:
 
@@ -156,7 +183,7 @@ Core switches may be used before the first job:
 | `-p`, `--profile` | Print profiler milestones. |
 | `--test-report-email` | Render and send a test report email without crawling. |
 
-## Bundled Jobs
+## Official Jobs
 
 ### Sitemap
 
@@ -275,7 +302,7 @@ Package:
 
 This package contains marker lists used to detect common bot protection, WAF, CAPTCHA, and challenge/interstitial responses.
 
-The bundled `link-issues` job uses these markers during external-link audits. If an external URL returns something that looks like a bot challenge, the job skips the broken-link finding instead of reporting a false positive. That matters most for CDNs, WAF-protected sites, and services that reject crawler-style HEAD requests but still work in a browser.
+The official `link-issues` job uses these markers during external-link audits. If an external URL returns something that looks like a bot challenge, the job skips the broken-link finding instead of reporting a false positive. That matters most for CDNs, WAF-protected sites, and services that reject crawler-style HEAD requests but still work in a browser.
 
 Keeping the markers separate lets Arachnodex update bot-protection detection without requiring a full core crawler or job release. Updating `@arachnodex/bot-protection-heuristics` can improve how `link-issues` classifies those external responses.
 

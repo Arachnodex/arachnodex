@@ -75,7 +75,7 @@ export class JobManager {
 
         try {
 
-            // Job handles are resolved at runtime so core can load bundled jobs,
+            // Job handles are resolved at runtime so core can load official jobs,
             // scoped third-party packages, and exact npm: package names with one path.
             const moduleName = getJobModuleName(jobHandle);
             const jobUnknown: unknown = await import(moduleName);
@@ -119,6 +119,11 @@ export class JobManager {
     // Trickle crawler events down to individual jobs
     dispatchEvent<K extends CallbackKeys>(callback: K, ...args: EventArgsMap[K]) {
         for (const job of this.jobs) {
+            if(callback === 'onEnd' && !hasCallback(job, callback)) {
+                job.completed = true;
+                continue;
+            }
+
             if (hasCallback(job, callback)) {
                 if(callback === 'onEnd') {
                     // Shutdown hooks may be async, so route them through the wrapper that
@@ -154,8 +159,10 @@ export class JobManager {
                 // Do not await here; the crawler polls running jobs so one slow job does not
                 // block dispatching shutdown to later jobs.
                 void result.then(() => {
+                    job.completed = true;
                     this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process complete');
                 }).catch((e: unknown) => {
+                    job.completed = true;
                     this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process failed');
                     eventBus.emit(
                         'error',
@@ -169,8 +176,10 @@ export class JobManager {
                 return;
             }
 
+            job.completed = true;
             this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process complete');
         } catch(e) {
+            job.completed = true;
             this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process failed');
             eventBus.emit(
                 'error',

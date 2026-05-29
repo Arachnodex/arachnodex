@@ -32,6 +32,7 @@ import crypto from "crypto";
 
 const pollMs = 25;
 const pollMsExt = 150;
+const hostnameWwwPattern = /^www\./i;
 
 export class Arachnodex {
 
@@ -87,17 +88,28 @@ export class Arachnodex {
 
         // Validate Config
         this.baseUrl = ConfigService.getConfigString('baseUrl');
-        const domain = ConfigService.getConfigString('domain');
-        if (!this.baseUrl.match(/^https?:\/\//) || this.baseUrl.split('/').length > 3) {
-            eventBus.emit(
-                'boot-error', new Error('Crawler config for `baseUrl` must be set and must start with ' +
-                    'http:// or https:// and may only contain two slashes.'));
+        const domain = ConfigService.getConfigString('domain').toLowerCase();
+        if(domain === '') {
+            this.emitConfigError(new Error('Config option `domain` must be set.'));
         }
-        const domainPattern = new RegExp(`^www.|${domain}$`);
-        if (domain === "" || !domain.match(domainPattern)) {
-            eventBus.emit('boot-error', new Error('Config option `domain` must be set, cannot ' +
-                'start with "www." and the `baseUrl` property must end with `domain` exactly.'));
+        if(domain.match(hostnameWwwPattern)) {
+            this.emitConfigError(new Error('Config option `domain` cannot start with "www.".'));
+        }
 
+        let baseUrl: URL;
+        try {
+            baseUrl = new URL(this.baseUrl);
+        } catch {
+            this.emitConfigError(new Error('Crawler config for `baseUrl` must be a valid URL.'));
+        }
+        if(baseUrl.protocol !== 'http:' && baseUrl.protocol !== 'https:') {
+            this.emitConfigError(new Error('Crawler config for `baseUrl` must start with http:// or https://.'));
+        }
+        if(baseUrl.pathname !== '/' || baseUrl.search !== '' || baseUrl.hash !== '') {
+            this.emitConfigError(new Error('Crawler config for `baseUrl` may not include a path, query string, or hash.'));
+        }
+        if(this.normalizeHostname(baseUrl.hostname) !== domain) {
+            this.emitConfigError(new Error('Crawler config for `baseUrl` hostname must match `domain`, allowing only an optional leading "www.".'));
         }
         UrlHelper.loadConfig();
 
@@ -113,6 +125,15 @@ export class Arachnodex {
         this.jobs = new JobManager(command.getJobs(), this.profiler, this.verbosityLevel);
 
         this.errorEventHandler = this.errorEventHandler.bind(this);
+    }
+
+    private normalizeHostname(hostname: string): string {
+        return hostname.toLowerCase().replace(hostnameWwwPattern, '');
+    }
+
+    private emitConfigError(error: Error): never {
+        eventBus.emit('boot-error', error);
+        throw error;
     }
 
     // ====================
@@ -688,6 +709,11 @@ export class Arachnodex {
                 const referral = location.referer !== null ? ` Referred by: ${location.referer}` : '';
                 this.console.log(`${statusCode} ${statusText}: ${location.url}${referral}`, 'red.bold');
             }
+        } else if (statusCode >= 500) {
+            //console.dir(response);
+            if(!this.muteResponseStatus) {
+                this.console.log(`${statusCode} ${statusText}: ${location.url}`, 'bgRed.white.bold');
+            }
         } else if (statusCode >= 400) {
             if(!this.muteResponseStatus) {
                 this.console.log(`${statusCode} ${statusText}: ${location.url}`, 'red.bold');
@@ -695,11 +721,6 @@ export class Arachnodex {
             if(statusCode === 429) {
                 const e = new Error('HTTP 429 Received (Too fast!) - Increase request delay and try again.');
                 eventBus.emit('error', e, undefined, undefined, false, true);
-            }
-        } else if (statusCode >= 500) {
-            //console.dir(response);
-            if(!this.muteResponseStatus) {
-                this.console.log(`${statusCode} ${statusText}: ${location.url}`, 'bgRed.white.bold');
             }
         } else {
             if(!this.muteResponseStatus) {
