@@ -10,9 +10,9 @@ type ScaffoldConfig = {
 }
 
 const packageDependencies = {
-    "@arachnodex/core": "^1.0.0",
-    "@arachnodex/job-link-issues": "^1.0.0",
-    "@arachnodex/job-sitemap": "^1.0.0"
+    "@arachnodex/core": "^1.0.1",
+    "@arachnodex/job-link-issues": "^1.0.1",
+    "@arachnodex/job-sitemap": "^1.0.1"
 };
 
 const packageDevDependencies = {
@@ -85,12 +85,9 @@ function showHelp(): void {
 function scaffoldProject(config: ScaffoldConfig): void {
     ensureTargetDirectory(config);
     mkdirSync(resolve(config.targetDir, "config"), {recursive: true});
-    mkdirSync(resolve(config.targetDir, "src"), {recursive: true});
-    mkdirSync(resolve(config.targetDir, "bin"), {recursive: true});
 
     writeProjectPackageJson(config.targetDir);
-    writeFileSync(resolve(config.targetDir, "src", ".gitkeep"), "");
-    writeFileSync(resolve(config.targetDir, "bin", ".gitkeep"), "");
+    copyReadmeFile(config.targetDir);
     copyConfigFiles(config.targetDir);
 }
 
@@ -143,6 +140,11 @@ function copyConfigFiles(targetDir: string): void {
         copyFileSync(source, exampleDestination);
         copyFileSync(source, runtimeDestination);
     });
+}
+
+function copyReadmeFile(targetDir: string): void {
+    const source = resolvePackageFile("@arachnodex/core/README.md");
+    copyFileSync(source, resolve(targetDir, "README.md"));
 }
 
 function resolvePackageFile(specifier: string): string {

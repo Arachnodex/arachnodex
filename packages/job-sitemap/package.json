@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/job-sitemap",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Arachnodex job for generating crawl sitemaps.",
   "type": "module",
   "main": "bin/index.js",
@@ -51,10 +51,10 @@
     "fs-extra": "^11.3.2"
   },
   "peerDependencies": {
-    "@arachnodex/core": "^1.0.0"
+    "@arachnodex/core": "^1.0.1"
   },
   "devDependencies": {
-    "@arachnodex/core": "^1.0.0",
+    "@arachnodex/core": "^1.0.1",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^22",
     "esbuild": "^0.25.0",

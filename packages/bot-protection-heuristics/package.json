@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/bot-protection-heuristics",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Arachnodex bot protection challenge detection heuristics.",
   "type": "module",
   "main": "bin/index.js",

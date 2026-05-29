@@ -4,7 +4,8 @@
   "private": true,
   "packageManager": "npm@11.13.0",
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "sync:core-readme": "node scripts/sync-core-readme.cjs",
+    "build": "npm run sync:core-readme && npm run build --workspaces --if-present",
     "typecheck": "npm exec --workspaces -- tsc --noEmit --pretty false",
     "lint": "npm exec -- eslint \"packages/**/src/**/*.ts\" --ignore-pattern \"**/*.d.ts\"",
     "check": "npm run build && npm run typecheck && npm run lint && git diff --check && git diff --exit-code -- packages",
