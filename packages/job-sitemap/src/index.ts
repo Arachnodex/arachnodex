@@ -4,7 +4,7 @@ import type {PageData, Location, JSONObject, ReportData} from "@arachnodex/core"
 import type {AxiosResponse} from "axios";
 import type {FileHandle} from 'fs/promises';
 
-import {BaseJob, ConfigService, eventBus, type JobCommandParser, type Profiler} from "@arachnodex/core";
+import {BaseJob, type ArachnodexRuntime, type JobCommandParser, type Profiler} from "@arachnodex/core";
 import {open} from 'fs/promises'
 import fse from 'fs-extra'
 import {tmpdir} from "os";
@@ -46,8 +46,8 @@ export default class Sitemap extends BaseJob {
     // Keep track of URLS so that no duplicated URL is added.
     loggedUrls: string[] = [];
 
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler) {
-        super(handle, command, profiler);
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime) {
+        super(handle, command, profiler, runtime);
     }
 
     loadConfig() {
@@ -60,7 +60,7 @@ export default class Sitemap extends BaseJob {
             outputFile: '../web/sitemap.xml',
             includeDocPattern: '((x-)?pdf)|(ms-?excel)|(vnd.)|(ms-?word)|(ms-?powerpoint)|(ms-?access)|(download)'
         }
-        const config = ConfigService.getJobConfig(defaultConfig, this.command, true);
+        const config = this.config.getJobConfig(defaultConfig, this.command, true);
         this.includeOnlyCanonical = config.includeOnlyCanonical;
         this.includeDocs = config.includeDocs;
         this.emailReportEnabled = config.emailReportEnabled;
@@ -84,11 +84,11 @@ export default class Sitemap extends BaseJob {
         }
 
         // Create writer for page URLs
-        this.pageWriter = new StreamWriter(this.pageWriterFile);
+        this.pageWriter = new StreamWriter(this.pageWriterFile, this.events);
 
         // Create writer for document URLs
         if(this.includeDocs) {
-            this.docWriter = new StreamWriter(this.docWriterFile);
+            this.docWriter = new StreamWriter(this.docWriterFile, this.events);
         }
 
     }
@@ -291,7 +291,7 @@ export default class Sitemap extends BaseJob {
     // Error helper
     emitFatal(e?:Error|null, message?: string, location?: Location) {
         e = e ?? null;
-        eventBus.emit(
+        this.events.emit(
             'error',
             e,
             message ?? e?.message ?? 'Unknown Error',

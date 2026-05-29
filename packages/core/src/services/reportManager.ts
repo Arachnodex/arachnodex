@@ -10,6 +10,7 @@ import type SMTPConnection from "nodemailer/lib/smtp-connection/index.js";
 import type {MailOptions} from "nodemailer/lib/smtp-transport/index.js";
 import type {Transporter} from "nodemailer";
 import {ConfigService} from "./configLoader.js";
+import type {ConfigLoader} from "./configLoader.js";
 import {OutputHelper} from "./outputHelper.js";
 import type {BaseJob} from "../jobs/baseJob.js";
 import type {
@@ -57,10 +58,12 @@ export class ReportManager {
     private logoDataUri?: string;
     private readonly profiler: Profiler;
     private readonly console: OutputHelper;
+    private readonly config: ConfigLoader;
 
-    constructor(profiler: Profiler) {
+    constructor(profiler: Profiler, config: ConfigLoader = ConfigService) {
         this.profiler = profiler;
-        this.console = new OutputHelper();
+        this.config = config;
+        this.console = new OutputHelper(false, true, this.config);
     }
 
     async sendReport(stats: CrawlerStats, jobs: BaseJob[]): Promise<boolean> {
@@ -123,7 +126,7 @@ export class ReportManager {
     }
 
     isSendingAllowed(): boolean {
-        return !ConfigService.getConfigBoolean('mail.disabled');
+        return !this.config.getConfigBoolean('mail.disabled');
     }
 
     createMailer(): Transporter {
@@ -139,7 +142,7 @@ export class ReportManager {
                 rejectUnauthorized: true
             }
         };
-        transportConfig = ConfigService.getConfigValue('mail.transport', null, transportConfig);
+        transportConfig = this.config.getConfigValue('mail.transport', null, transportConfig);
 
         if (typeof transportConfig !== 'object' ||
             transportConfig === null ||
@@ -199,9 +202,9 @@ export class ReportManager {
         const html = this.renderMainTemplate(stats, jobReports, jobs, subject);
 
         return {
-            from: this.formatRecipientMap(ConfigService.getConfigValue<RecipientMap>('mail.from', null, {})),
-            to: this.formatRecipientMaps(ConfigService.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])),
-            replyTo: this.formatRecipientMaps(ConfigService.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
+            from: this.formatRecipientMap(this.config.getConfigValue<RecipientMap>('mail.from', null, {})),
+            to: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])),
+            replyTo: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
             subject,
             html,
             text: this.htmlToText(html)
@@ -217,21 +220,21 @@ export class ReportManager {
         const subject = this.renderErrorSubject(errors, jobs, fatalOnly);
         const html = this.renderErrorTemplate(stats, errors, jobs, subject, fatalOnly);
         const errorRecipients = this.formatRecipientMaps(
-            ConfigService.getConfigValue<RecipientMap[]>('mail.errorRecipients', null, [])
+            this.config.getConfigValue<RecipientMap[]>('mail.errorRecipients', null, [])
         );
         const developerRecipients = this.formatRecipientMaps(
-            ConfigService.getConfigValue<RecipientMap[]>('mail.developerRecipients', null, [])
+            this.config.getConfigValue<RecipientMap[]>('mail.developerRecipients', null, [])
         );
         const finalFallbackRecipients = this.formatRecipientMaps(
-            ConfigService.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])
+            this.config.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])
         );
 
         return {
-            from: this.formatRecipientMap(ConfigService.getConfigValue<RecipientMap>('mail.from', null, {})),
+            from: this.formatRecipientMap(this.config.getConfigValue<RecipientMap>('mail.from', null, {})),
             to: errorRecipients !== ''
                 ? errorRecipients
                 : (developerRecipients !== '' ? developerRecipients : finalFallbackRecipients),
-            replyTo: this.formatRecipientMaps(ConfigService.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
+            replyTo: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
             subject,
             html,
             text: this.htmlToText(html)
@@ -243,9 +246,9 @@ export class ReportManager {
         return template({
             logoDataUri: this.getLogoDataUri(),
             subject,
-            siteName: ConfigService.getConfigString('siteName'),
-            domain: ConfigService.getConfigString('domain'),
-            baseUrl: ConfigService.getConfigString('baseUrl'),
+            siteName: this.config.getConfigString('siteName'),
+            domain: this.config.getConfigString('domain'),
+            baseUrl: this.config.getConfigString('baseUrl'),
             generatedAt: new Date().toISOString(),
             durationSeconds: this.profiler.getDurationSeconds().toFixed(2),
             stats,
@@ -297,10 +300,10 @@ export class ReportManager {
     }
 
     private renderSubject(jobs: BaseJob[]): string {
-        const template = Handlebars.compile(ConfigService.getConfigString('mail.defaultSubject'));
+        const template = Handlebars.compile(this.config.getConfigString('mail.defaultSubject'));
         return template({
-            domain: ConfigService.getConfigString('domain'),
-            siteName: ConfigService.getConfigString('siteName'),
+            domain: this.config.getConfigString('domain'),
+            siteName: this.config.getConfigString('siteName'),
             jobs: jobs.map(job => job.getName()).join(', ')
         });
     }
@@ -308,7 +311,7 @@ export class ReportManager {
     private renderErrorSubject(errors: CrawlerError[], jobs: BaseJob[], fatalOnly: boolean): string {
         const severity = fatalOnly ? 'Fatal Error' : 'Crawler Errors';
         const jobsLabel = jobs.length > 0 ? ` [${jobs.map(job => job.getName()).join(', ')}]` : '';
-        return `Arachnodex ${ConfigService.getConfigString('domain')} ${severity} Report${jobsLabel} (${errors.length})`;
+        return `Arachnodex ${this.config.getConfigString('domain')} ${severity} Report${jobsLabel} (${errors.length})`;
     }
 
     private renderErrorTemplate(
@@ -322,9 +325,9 @@ export class ReportManager {
         return template({
             logoDataUri: this.getLogoDataUri(),
             subject,
-            siteName: ConfigService.getConfigString('siteName'),
-            domain: ConfigService.getConfigString('domain'),
-            baseUrl: ConfigService.getConfigString('baseUrl'),
+            siteName: this.config.getConfigString('siteName'),
+            domain: this.config.getConfigString('domain'),
+            baseUrl: this.config.getConfigString('baseUrl'),
             generatedAt: new Date().toISOString(),
             durationSeconds: this.profiler.getDurationSeconds().toFixed(2),
             stats,

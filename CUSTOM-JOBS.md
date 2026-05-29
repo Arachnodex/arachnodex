@@ -157,7 +157,7 @@ Create a default export that extends `BaseJob`:
 import type {AxiosResponse} from "axios";
 import {
   BaseJob,
-  ConfigService,
+  type ArachnodexRuntime,
   type JobCommandParser,
   type JSONObject,
   type Location,
@@ -179,12 +179,12 @@ export default class ContentAuditJob extends BaseJob {
   private requiredText = "";
   private missingPages: string[] = [];
 
-  constructor(handle: string, command: JobCommandParser, profiler: Profiler) {
-    super(handle, command, profiler);
+  constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime) {
+    super(handle, command, profiler, runtime);
   }
 
   loadConfig(): void {
-    const config = ConfigService.getJobConfig<ContentAuditConfig>(
+    const config = this.config.getJobConfig<ContentAuditConfig>(
       {
         emailReportEnabled: true,
         requiredText: ""
@@ -243,6 +243,8 @@ export default class ContentAuditJob extends BaseJob {
   }
 }
 ```
+
+`BaseJob` exposes the per-run runtime helpers as `this.config`, `this.events`, and `this.urlHelper`. Use those instead of importing the legacy singleton helpers directly, especially if your job may be used by tests or programmatic callers that run more than one crawl in the same Node process.
 
 Available lifecycle hooks:
 
@@ -334,7 +336,7 @@ config/content-audit.json
 Inside `loadConfig()`, call:
 
 ```ts
-const config = ConfigService.getJobConfig(defaultConfig, this.command, this.configRequired);
+const config = this.config.getJobConfig(defaultConfig, this.command, this.configRequired);
 ```
 
 Command switches with `configPath` values override values from the job config file.

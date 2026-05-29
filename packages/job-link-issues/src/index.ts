@@ -16,10 +16,9 @@ import type {
 import {
     BaseJob,
     botProtectionHeuristics,
-    ConfigService,
     defaultRequestHeaders,
     OutputHelper,
-    UrlHelper,
+    type ArachnodexRuntime,
     type JobCommandParser,
     type Profiler
 } from "@arachnodex/core";
@@ -211,10 +210,10 @@ export default class LinkIssues extends BaseJob {
     includeExternal: boolean;
     promptOutput: boolean;
 
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler) {
-        super(handle, command, profiler);
-        this.console = new OutputHelper();
-        this.baseUrl = ConfigService.getConfigString('baseUrl');
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime) {
+        super(handle, command, profiler, runtime);
+        this.console = new OutputHelper(true, true, this.config);
+        this.baseUrl = this.config.getConfigString('baseUrl');
         const base = new URL(this.baseUrl);
         this.baseProtocol = base.protocol;
         this.baseHostname = this.normalizeHostname(base.hostname);
@@ -230,7 +229,7 @@ export default class LinkIssues extends BaseJob {
     loadConfig(): void {
         // Config controls reporting thresholds and URL-quality policy. Command switches
         // decide whether optional notice/external/prompt output is enabled for this run.
-        const config = ConfigService.getJobConfig<LinkIssuesConfig>({
+        const config = this.config.getJobConfig<LinkIssuesConfig>({
             allowedNonCanonicalLinks: [],
             emailReportTriggerLevels: ['error', 'warning', 'notice'],
             undesirablePathCharacterPattern: '[^\\w\\-/.]',
@@ -487,8 +486,8 @@ export default class LinkIssues extends BaseJob {
         }
 
         const normalizedUrl = this.normalizeInternalUrl(parsed.href);
-        return !UrlHelper.validateLocation(normalizedUrl, 'urlCantContain')
-            || !UrlHelper.validateLocation(normalizedUrl, 'urlMustContain');
+        return !this.urlHelper.validateLocation(normalizedUrl, 'urlCantContain')
+            || !this.urlHelper.validateLocation(normalizedUrl, 'urlMustContain');
     }
 
     private getReportKey(issue: LinkIssue): string {
@@ -1965,7 +1964,7 @@ export default class LinkIssues extends BaseJob {
             httpsAgent: new https.Agent({
                 timeout: externalCheckTimeoutMs,
                 requestCert: false,
-                rejectUnauthorized: ConfigService.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
+                rejectUnauthorized: this.config.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
             })
         };
 

@@ -1,6 +1,7 @@
 "use strict";
 
 import {ConfigService} from "./configLoader.js";
+import type {ConfigLoader} from "./configLoader.js";
 import chalk from 'chalk';
 
 // Define allowed chalk style keys
@@ -21,11 +22,11 @@ export class OutputHelper {
     disableColorOutput: boolean;
     jobInstance: boolean;
 
-    constructor(jobInstance = false, readConfig = true) {
+    constructor(jobInstance = false, readConfig = true, private readonly config: ConfigLoader = ConfigService) {
         this.jobInstance = jobInstance;
-        this.muteResponseStatus = readConfig ? ConfigService.getConfigBoolean('muteResponseStatus') : false;
-        this.muteAll = readConfig ? ConfigService.getConfigBoolean('muteAll') : false;
-        this.disableColorOutput = readConfig ? ConfigService.getConfigBoolean('disableColorOutput') : false;
+        this.muteResponseStatus = readConfig ? this.config.getConfigBoolean('muteResponseStatus') : false;
+        this.muteAll = readConfig ? this.config.getConfigBoolean('muteAll') : false;
+        this.disableColorOutput = readConfig ? this.config.getConfigBoolean('disableColorOutput') : false;
     }
 
 

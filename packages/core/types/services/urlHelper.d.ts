@@ -1,5 +1,7 @@
 import type { Location } from "../definitions.ts";
-declare class _urlHelper {
+import type { ConfigLoader } from "./configLoader.js";
+export declare class UrlHelperService {
+    private readonly config;
     baseUrl: string;
     domain: string;
     urlCantContain: RegExp[];
@@ -7,6 +9,7 @@ declare class _urlHelper {
     dontResetUrls: boolean;
     treatHashAsUniquePage: boolean;
     private initialized;
+    constructor(config?: ConfigLoader);
     loadConfig(): void;
     private ensureConfigLoaded;
     validateLocation(url: string, ruleSet: string): boolean;
@@ -21,5 +24,4 @@ declare class _urlHelper {
     private normalizeHostname;
     private removeBaseUrl;
 }
-export declare const UrlHelper: _urlHelper;
-export {};
+export declare const UrlHelper: UrlHelperService;

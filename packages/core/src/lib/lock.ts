@@ -1,9 +1,12 @@
 "use strict";
 import { setTimeout as sleep } from "timers/promises";
+import type EventEmitter from "eventemitter3";
 import eventBus from "./eventBus.js";
 export class Lock {
     private locked = false;
     private hardLocked = false;
+
+    constructor(private readonly events: EventEmitter | null = null) {}
 
     async forUnlock() : Promise<void> {
         while (this.locked) {
@@ -20,13 +23,13 @@ export class Lock {
         if(hardLock) {
             this.hardLocked = true;
         }
-        eventBus.emit('lock-state-update', true);
+        (this.events ?? eventBus).emit('lock-state-update', true);
     }
 
     unlock(): void {
         if(!this.hardLocked) {
             this.locked = false;
-            eventBus.emit('lock-state-update', false);
+            (this.events ?? eventBus).emit('lock-state-update', false);
         }
     }
 }

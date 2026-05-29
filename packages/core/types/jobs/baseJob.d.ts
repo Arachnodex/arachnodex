@@ -2,6 +2,7 @@ import type { Location, PageData, ReportData } from "../definitions.js";
 import type { JobCommandParser } from "../command/jobCommandParser.js";
 import type { AxiosResponse } from "axios";
 import type { Profiler } from "../services/profiler.js";
+import { ArachnodexRuntime } from "../runtime.js";
 export interface Job {
     name?: string;
     handle: string;
@@ -19,9 +20,13 @@ export declare abstract class BaseJob implements Job {
     handle: string;
     command: JobCommandParser;
     profiler: Profiler;
+    runtime: ArachnodexRuntime;
     verbosityLevel: number;
     emailReportEnabled: boolean;
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler);
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime?: ArachnodexRuntime);
+    get config(): import("../services/configLoader.js").ConfigLoader;
+    get events(): import("eventemitter3")<string | symbol, any>;
+    get urlHelper(): import("../services/urlHelper.js").UrlHelperService;
     loadConfig(): void;
     getName(): string;
     announce(): void;

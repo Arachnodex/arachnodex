@@ -1,7 +1,7 @@
 import type { PageData, Location, ReportData } from "@arachnodex/core";
 import type { AxiosResponse } from "axios";
 import type { FileHandle } from 'fs/promises';
-import { BaseJob, type JobCommandParser, type Profiler } from "@arachnodex/core";
+import { BaseJob, type ArachnodexRuntime, type JobCommandParser, type Profiler } from "@arachnodex/core";
 import { StreamWriter } from "./streamWriter.js";
 export { default as CommandParser } from "./cmd.js";
 export default class Sitemap extends BaseJob {
@@ -18,7 +18,7 @@ export default class Sitemap extends BaseJob {
     pageUrlCount: number;
     docUrlCount: number;
     loggedUrls: string[];
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler);
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime);
     loadConfig(): void;
     onInit(): void;
     getLastModifiedHeader(r: AxiosResponse | null): string;

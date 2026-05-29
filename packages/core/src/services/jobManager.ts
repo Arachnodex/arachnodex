@@ -6,8 +6,9 @@ import type {AxiosResponse} from "axios";
 
 import {JobCommandParser} from "../command/jobCommandParser.js";
 import type {Profiler} from "./profiler.js";
-import eventBus from '../lib/eventBus.js';
 import {getJobModuleName} from "../jobs/jobModules.js";
+import {ArachnodexRuntime} from "../runtime.js";
+import {isCommandExit} from "../command/commandExit.js";
 
 type BaseJobCtor = new (...args: unknown[]) => BaseJob;
 type JcpCtor = new (...args: unknown[]) => JobCommandParser;
@@ -54,11 +55,13 @@ export class JobManager {
     jobs: BaseJob[] = [];
     profiler: Profiler;
     verbosityLevel: number;
+    runtime: ArachnodexRuntime;
 
-    constructor(jobs: {[k: string]: JobCommand}, profiler: Profiler, verbosityLevel = 0) {
+    constructor(jobs: {[k: string]: JobCommand}, profiler: Profiler, verbosityLevel = 0, runtime = new ArachnodexRuntime()) {
         this.jobCommands = jobs;
         this.verbosityLevel = verbosityLevel;
         this.profiler = profiler;
+        this.runtime = runtime;
     }
 
     async importJob() {
@@ -83,7 +86,7 @@ export class JobManager {
             let job: BaseJob;
             if (hasDefaultCtor(jobUnknown)) {
                 const JobClass = jobUnknown.default;
-                job = new JobClass(jobHandle, jcParser, this.profiler);
+                job = new JobClass(jobHandle, jcParser, this.profiler, this.runtime);
                 job.loadConfig();
                 job.verbosityLevel = this.verbosityLevel;
             } else {
@@ -101,8 +104,12 @@ export class JobManager {
 
 
         } catch(e) {
+            if(isCommandExit(e)) {
+                throw e;
+            }
+
             console.error(e);
-            eventBus.emit(
+            this.runtime.events.emit(
                 'error',
                 e,
                 'An error during job class import.',
@@ -164,7 +171,7 @@ export class JobManager {
                 }).catch((e: unknown) => {
                     job.completed = true;
                     this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process failed');
-                    eventBus.emit(
+                    this.runtime.events.emit(
                         'error',
                         e instanceof Error ? e : new Error(String(e)),
                         'An error occurred during job shutdown/reporting.',
@@ -181,7 +188,7 @@ export class JobManager {
         } catch(e) {
             job.completed = true;
             this.profiler.markJob(job.handle, 'shutdown', 'job shutdown/reporting process failed');
-            eventBus.emit(
+            this.runtime.events.emit(
                 'error',
                 e instanceof Error ? e : new Error(String(e)),
                 'An error occurred during job shutdown/reporting.',

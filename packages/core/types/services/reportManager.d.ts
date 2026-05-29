@@ -1,5 +1,6 @@
 import type { MailOptions } from "nodemailer/lib/smtp-transport/index.js";
 import type { Transporter } from "nodemailer";
+import type { ConfigLoader } from "./configLoader.js";
 import type { BaseJob } from "../jobs/baseJob.js";
 import type { CrawlerError, CrawlerStats } from "../definitions.js";
 import type { Profiler } from "./profiler.js";
@@ -19,7 +20,8 @@ export declare class ReportManager {
     private logoDataUri?;
     private readonly profiler;
     private readonly console;
-    constructor(profiler: Profiler);
+    private readonly config;
+    constructor(profiler: Profiler, config?: ConfigLoader);
     sendReport(stats: CrawlerStats, jobs: BaseJob[]): Promise<boolean>;
     sendErrorReport(errors: CrawlerError[], stats: CrawlerStats, jobs: BaseJob[], fatalOnly?: boolean): Promise<boolean>;
     isSendingAllowed(): boolean;

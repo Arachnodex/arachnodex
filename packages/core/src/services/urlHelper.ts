@@ -2,12 +2,13 @@
 
 import type {Location} from "../definitions.ts";
 import {ConfigService} from "./configLoader.js";
+import type {ConfigLoader} from "./configLoader.js";
 
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-class _urlHelper {
+export class UrlHelperService {
 
     baseUrl = '';
     domain = '';
@@ -17,18 +18,20 @@ class _urlHelper {
     treatHashAsUniquePage = false;
     private initialized = false;
 
+    constructor(private readonly config: ConfigLoader = ConfigService) {}
+
     loadConfig(): void {
 
         // populate locally needed config data as props
-        this.baseUrl = ConfigService.getConfigString('baseUrl').replace(/\/+$/, '');
-        this.domain = ConfigService.getConfigString('domain');
-        this.urlCantContain = ConfigService.getConfigRegExArray('urlCantContain');
-        this.urlMustContain = ConfigService.getConfigRegExArray('urlMustContain');
-        this.dontResetUrls = ConfigService.getConfigBoolean('dontResetUrls');
-        this.treatHashAsUniquePage = ConfigService.getConfigBoolean('treatHashAsUniquePage');
+        this.baseUrl = this.config.getConfigString('baseUrl').replace(/\/+$/, '');
+        this.domain = this.config.getConfigString('domain');
+        this.urlCantContain = this.config.getConfigRegExArray('urlCantContain');
+        this.urlMustContain = this.config.getConfigRegExArray('urlMustContain');
+        this.dontResetUrls = this.config.getConfigBoolean('dontResetUrls');
+        this.treatHashAsUniquePage = this.config.getConfigBoolean('treatHashAsUniquePage');
 
         // Force path prefix if provided
-        const prefix = ConfigService.getConfigString('pathPrefix');
+        const prefix = this.config.getConfigString('pathPrefix');
         if(prefix !== '') {
             this.urlMustContain.push(new RegExp(escapeRegExp(this.domain + prefix)));
         }
@@ -233,4 +236,4 @@ class _urlHelper {
     }
 }
 
-export const UrlHelper = new _urlHelper();
+export const UrlHelper = new UrlHelperService();

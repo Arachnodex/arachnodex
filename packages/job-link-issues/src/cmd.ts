@@ -1,6 +1,6 @@
 "use strict";
 
-import {JobCommandParser, type ArgumentConfig} from "@arachnodex/core";
+import {CommandExit, JobCommandParser, type ArgumentConfig} from "@arachnodex/core";
 
 export default class LinkIssuesCmd extends JobCommandParser {
 
@@ -43,7 +43,7 @@ export default class LinkIssuesCmd extends JobCommandParser {
 
         if(this.arguments['-V'].active === true) {
             console.log('Link Issues Job Version ' + this.version);
-            process.exit(0);
+            throw new CommandExit(0);
         }
     }
 

@@ -1,6 +1,7 @@
 "use strict";
 import type {ArgumentConfig, JobCommand} from "../definitions.ts";
 import {BaseCommandParser} from "./baseCommandParser.js";
+import {CommandExit} from "./commandExit.js";
 import type {JobCommandParser} from "./jobCommandParser.js";
 import {JobCommandParser as DefaultJobCommandParser} from "./jobCommandParser.js";
 import {getJobModuleName} from "../jobs/jobModules.js";
@@ -125,7 +126,7 @@ export class MainCommandParser extends BaseCommandParser {
             console.log(await this.getJobHelpMessage(jobName));
         }
 
-        process.exit(0);
+        throw new CommandExit(0);
     }
 
     // Get config via command line -c switch or return 'default'

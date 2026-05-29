@@ -4,11 +4,14 @@ import { OutputHelper } from "./services/outputHelper.js";
 import { JobManager } from "./services/jobManager.js";
 import type { MainCommandParser } from "./command/mainCommandParser.js";
 import { Profiler } from "./services/profiler.js";
+import { ArachnodexRuntime } from "./runtime.js";
 import type { AxiosResponse } from "axios";
 export declare class Arachnodex {
+    private readonly runtime;
     jobs: JobManager;
     profiler: Profiler;
     fatalShutdownStarted: boolean;
+    fatalShutdownPromise?: Promise<void>;
     errors: CrawlerError[];
     threadCount: number;
     pending: Location[];
@@ -25,10 +28,10 @@ export declare class Arachnodex {
     baseUrl: string;
     console: OutputHelper;
     stats: CrawlerStats;
-    constructor(command: MainCommandParser);
+    constructor(command: MainCommandParser, runtime?: ArachnodexRuntime);
     private normalizeHostname;
     private emitConfigError;
-    start(): Promise<void>;
+    start(): Promise<number>;
     shutdown(): Promise<void>;
     sendTestReportEmail(): Promise<void>;
     private getTestReportStats;
@@ -55,5 +58,5 @@ export declare class Arachnodex {
     private isExternalUrl;
     private classifyLinkZone;
     errorEventHandler(e: Error, message?: string, location?: Location, suppressEmail?: boolean, fatal?: boolean): void;
-    private sendFatalErrorReportAndExit;
+    private sendFatalErrorReport;
 }

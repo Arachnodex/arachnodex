@@ -5,8 +5,8 @@ import type {Location, PageData, ReportData} from "../definitions.js";
 import type {JobCommandParser} from "../command/jobCommandParser.js";
 import type {AxiosResponse} from "axios";
 
-import {ConfigService} from "../services/configLoader.js";
 import type {Profiler} from "../services/profiler.js";
+import {ArachnodexRuntime} from "../runtime.js";
 
 export interface Job {
     // Jobs implement whichever lifecycle hooks they need. The crawler checks for
@@ -33,19 +33,33 @@ export abstract class BaseJob implements Job {
     handle: string;
     command: JobCommandParser;
     profiler: Profiler;
+    runtime: ArachnodexRuntime;
     verbosityLevel = 0;
     emailReportEnabled = true;
 
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler) {
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime = new ArachnodexRuntime()) {
         this.handle = handle;
         this.command = command;
         this.profiler = profiler;
+        this.runtime = runtime;
+    }
+
+    get config() {
+        return this.runtime.config;
+    }
+
+    get events() {
+        return this.runtime.events;
+    }
+
+    get urlHelper() {
+        return this.runtime.urlHelper;
     }
 
     loadConfig() {
         // Default config keeps email reporting enabled. Jobs with more config should
-        // override this and call ConfigService.getJobConfig with their own defaults.
-        const config = ConfigService.getJobConfig({emailReportEnabled: true}, this.command, false, () => {});
+        // override this and call this.config.getJobConfig with their own defaults.
+        const config = this.config.getJobConfig({emailReportEnabled: true}, this.command, false, () => {});
         this.emailReportEnabled = config.emailReportEnabled;
     }
 

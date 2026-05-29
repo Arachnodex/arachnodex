@@ -1,5 +1,7 @@
 export { runApp } from "./app.js";
+export { ArachnodexRuntime } from "./runtime.js";
 export { JobCommandParser } from "./command/jobCommandParser.js";
+export { CommandExit, isCommandExit } from "./command/commandExit.js";
 export { botProtectionHeuristics } from "@arachnodex/bot-protection-heuristics";
 export type { BotProtectionHeuristics } from "@arachnodex/bot-protection-heuristics";
 export type * from "./definitions.js";

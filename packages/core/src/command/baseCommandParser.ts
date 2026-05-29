@@ -1,7 +1,7 @@
 "use strict";
 
 import type { ArgumentConfig, JobCommand } from "../definitions.js";
-import eventBus from '../lib/eventBus.js';
+import {CommandExit} from "./commandExit.js";
 
 export interface CommandParserInterface {
     getConfigName(): string;
@@ -54,13 +54,10 @@ export abstract class BaseCommandParser implements CommandParserInterface {
         this.registerAdditionalSwitches(switches);
 
         // todo load job arguments straight away if switches are presented after a job name (to get switch arguments from job)
-        try {
-
-
-            let lastSwitch: ArgumentConfig|null = null;
-            let currentJob = "";
-            args.forEach(arg => {
-                const parsedSwitch = this.parseSwitchToken(arg);
+        let lastSwitch: ArgumentConfig|null = null;
+        let currentJob = "";
+        args.forEach(arg => {
+            const parsedSwitch = this.parseSwitchToken(arg);
 
                 if(currentJob !== '' && !this.isJobSwitch(lastSwitch) && !this.isJobSwitchToken(parsedSwitch)) {
                     // Main parsing only needs to split job argument groups. Job-specific
@@ -121,15 +118,9 @@ export abstract class BaseCommandParser implements CommandParserInterface {
                 }
             });
 
-            if(this.arguments['-h'].active === true && this.shouldAutoShowHelp()) {
-                void this.showHelpMessage();
-            }
-
-        } catch(e) {
-            // We could call the regular 'error' emitter when not in main mode
-            // but I cant see any benefit to doing that at this point in time so
-            // I'm just leaving this for now.
-            eventBus.emit('boot-error', e);
+        if(this.arguments['-h'].active === true && this.shouldAutoShowHelp()) {
+            void this.showHelpMessage();
+            throw new CommandExit(0);
         }
     }
 
@@ -179,8 +170,6 @@ export abstract class BaseCommandParser implements CommandParserInterface {
 
     showHelpMessage(): void|Promise<void> {
         console.log(this.getHelpMessage());
-
-        process.exit(0);
     }
 
     protected shouldHideSwitchInHelp(_argument: ArgumentConfig): boolean {

@@ -81,7 +81,7 @@ function getAtPath(root: unknown, path: string): JSONValue | null {
     return null;
 }
 
-class ConfigLoader {
+export class ConfigLoader {
 
     // local storage for config data
     appConfig?: AppConfig;

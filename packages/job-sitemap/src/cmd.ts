@@ -1,6 +1,6 @@
 "use strict";
 
-import {JobCommandParser, type ArgumentConfig} from "@arachnodex/core";
+import {CommandExit, JobCommandParser, type ArgumentConfig} from "@arachnodex/core";
 
 export default class SitemapCmd extends JobCommandParser {
 
@@ -21,7 +21,7 @@ export default class SitemapCmd extends JobCommandParser {
 
         if(this.arguments['-v'].active === true) {
             console.log('Sitemap Generator Job Version 1.0');
-            process.exit(0);
+            throw new CommandExit(0);
         }
     }
 

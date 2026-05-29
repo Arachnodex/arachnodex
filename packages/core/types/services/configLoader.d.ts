@@ -1,6 +1,6 @@
 import type { BaseCommandParser } from "../command/baseCommandParser.js";
 import type { AppConfig, JSONObject, JSONPrimitive, JSONValue } from '../definitions.ts';
-declare class ConfigLoader {
+export declare class ConfigLoader {
     appConfig?: AppConfig;
     private appConfigName?;
     private readonly jobConfigs;
@@ -18,4 +18,3 @@ declare class ConfigLoader {
     getConfigValue<T extends JSONValue>(configPath: string, configName?: string | null, returnAs?: T): T;
 }
 export declare const ConfigService: ConfigLoader;
-export {};

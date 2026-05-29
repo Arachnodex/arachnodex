@@ -14,20 +14,16 @@ import type {
 // Internal packages and helpers
 import {ArachnodexThread} from "./arachnodexThread.js";
 import {OutputHelper} from "./services/outputHelper.js";
-import {ConfigService} from "./services/configLoader.js";
-import {UrlHelper} from "./services/urlHelper.js";
 import {JobManager} from "./services/jobManager.js";
 import type {MainCommandParser} from "./command/mainCommandParser.js";
 import {Profiler} from "./services/profiler.js";
 import {ReportManager} from "./services/reportManager.js";
-import { activeThreads } from "./activeThreads.js";
+import {ArachnodexRuntime} from "./runtime.js";
 
 // External deps
 import type {AxiosResponse} from "axios";
 import { setTimeout as sleep } from "timers/promises";
 import {JSDOM, VirtualConsole} from "jsdom";
-import eventBus from './lib/eventBus.js';
-import sharedLock from './lib/lock.js';
 import crypto from "crypto";
 
 const pollMs = 25;
@@ -40,6 +36,7 @@ export class Arachnodex {
     jobs: JobManager;
     profiler: Profiler;
     fatalShutdownStarted = false;
+    fatalShutdownPromise?: Promise<void>;
 
     errors: CrawlerError[] = [];
 
@@ -82,13 +79,13 @@ export class Arachnodex {
     }
 
     // Initialization validates required config before any worker can start.
-    constructor(command: MainCommandParser) {
-        this.console = new OutputHelper();
+    constructor(command: MainCommandParser, private readonly runtime = new ArachnodexRuntime()) {
+        this.console = new OutputHelper(false, true, this.runtime.config);
         this.profiler = new Profiler(command.profilerEnabled(), this.console);
 
         // Validate Config
-        this.baseUrl = ConfigService.getConfigString('baseUrl');
-        const domain = ConfigService.getConfigString('domain').toLowerCase();
+        this.baseUrl = this.runtime.config.getConfigString('baseUrl');
+        const domain = this.runtime.config.getConfigString('domain').toLowerCase();
         if(domain === '') {
             this.emitConfigError(new Error('Config option `domain` must be set.'));
         }
@@ -111,18 +108,18 @@ export class Arachnodex {
         if(this.normalizeHostname(baseUrl.hostname) !== domain) {
             this.emitConfigError(new Error('Crawler config for `baseUrl` hostname must match `domain`, allowing only an optional leading "www.".'));
         }
-        UrlHelper.loadConfig();
+        this.runtime.urlHelper.loadConfig();
 
         // Get local Options
         this.verbosityLevel = command.getVerbosityLevel();
-        this.muteResponseStatus = ConfigService.getConfigBoolean('muteResponseStatus');
-        this.maxThreads = Number(ConfigService.getConfigNumber('numThreads'));
+        this.muteResponseStatus = this.runtime.config.getConfigBoolean('muteResponseStatus');
+        this.maxThreads = Number(this.runtime.config.getConfigNumber('numThreads'));
         if(this.maxThreads <= 1) {
             this.maxThreads = 1;
         }
 
         // Initialize job manager
-        this.jobs = new JobManager(command.getJobs(), this.profiler, this.verbosityLevel);
+        this.jobs = new JobManager(command.getJobs(), this.profiler, this.verbosityLevel, this.runtime);
 
         this.errorEventHandler = this.errorEventHandler.bind(this);
     }
@@ -132,7 +129,7 @@ export class Arachnodex {
     }
 
     private emitConfigError(error: Error): never {
-        eventBus.emit('boot-error', error);
+        this.runtime.events.emit('boot-error', error);
         throw error;
     }
 
@@ -140,7 +137,7 @@ export class Arachnodex {
     // START UP & SHUT DOWN
     // ====================
 
-    async start() {
+    async start(): Promise<number> {
         this.profiler.mark('crawl', 'starting crawl');
 
         // Import each requested job before crawling so job-specific config errors fail early.
@@ -155,29 +152,31 @@ export class Arachnodex {
         this.profiler.mark('crawl', 'job onInit dispatched');
 
         // Add the entry location (starts crawl / spawns worker threads)
-        const pathPrefix = ConfigService.getConfigString('pathPrefix');
-        const entryFile = ConfigService.getConfigString('entryFile');
+        const pathPrefix = this.runtime.config.getConfigString('pathPrefix');
+        const entryFile = this.runtime.config.getConfigString('entryFile');
         await this.addNewLocation({
-            url: UrlHelper.baseUrl + pathPrefix + entryFile,
+            url: this.runtime.urlHelper.baseUrl + pathPrefix + entryFile,
             rawUrl: '/' + pathPrefix + entryFile,
         });
 
         // The main process only coordinates workers. Actual request work happens in ArachnodexThread.
 
         //while (!this.crawlStarted || this.pending.length > 0 || this.pendingDelayed.length > 0 || this.workerInFlight()) {
-        while (!this.crawlStarted || this.threadCount > 0) {
-            //console.log('Main thread loop', 'Pending URLs (Priority/Delayed): ' + this.pending.length + '/' + this.pendingDelayed.length, 'Active Threads: ' + activeThreads.length);
+        while (!this.fatalShutdownStarted && (!this.crawlStarted || this.threadCount > 0)) {
+            //console.log('Main thread loop', 'Pending URLs (Priority/Delayed): ' + this.pending.length + '/' + this.pendingDelayed.length, 'Active Threads: ' + this.runtime.activeThreads.length);
             await sleep(pollMsExt);
         }
 
         //await sleep(2000);
 
+        if(this.fatalShutdownStarted) {
+            await this.fatalShutdownPromise;
+            return 1;
+        }
+
         // Send reports and shut down
         await this.shutdown();
-
-        // terminate
-        process.exit(0);
-
+        return 0;
     }
 
 
@@ -198,11 +197,11 @@ export class Arachnodex {
         this.profiler.mark('shutdown', 'jobs completed');
 
         this.profiler.mark('shutdown', 'regular report email send starting');
-        await new ReportManager(this.profiler).sendReport(this.stats, this.jobs.jobs);
+        await new ReportManager(this.profiler, this.runtime.config).sendReport(this.stats, this.jobs.jobs);
         this.profiler.mark('shutdown', 'regular report email send complete');
 
         this.profiler.mark('shutdown', 'accumulated error report email send starting');
-        await new ReportManager(this.profiler).sendErrorReport(this.errors, this.stats, this.jobs.jobs);
+        await new ReportManager(this.profiler, this.runtime.config).sendErrorReport(this.errors, this.stats, this.jobs.jobs);
         this.profiler.mark('shutdown', 'accumulated error report email send complete');
 
 
@@ -259,7 +258,7 @@ export class Arachnodex {
             throw new Error('No jobs were loaded for the test report email.');
         }
 
-        await new ReportManager(this.profiler).sendReport(this.getTestReportStats(), this.jobs.jobs);
+        await new ReportManager(this.profiler, this.runtime.config).sendReport(this.getTestReportStats(), this.jobs.jobs);
         this.profiler.mark('report-email', 'test report email complete');
     }
 
@@ -315,21 +314,21 @@ export class Arachnodex {
     async addNewLocation(location: Location) {
 
         // Normalize and filter before touching shared queue state.
-        if (!UrlHelper.prepareUrl(location)) {
+        if (!this.runtime.urlHelper.prepareUrl(location)) {
             // force death if no threads are active
-            if (activeThreads.size <= 0) {
+            if (this.runtime.activeThreads.size <= 0) {
                 console.error('Ended because no location could be added while no workers had been activated. Config problem?');
-                process.exit(1);
+                throw new Error('No location could be added while no workers had been activated. Check crawler config.');
             }
             // Discard off-site, incompatible or invalid url
             return false;
         }
 
         // Handle cant/must contain conditions,
-        if(!UrlHelper.validateLocation(location.url, 'urlCantContain')) {
+        if(!this.runtime.urlHelper.validateLocation(location.url, 'urlCantContain')) {
             return false;
         }
-        if(!UrlHelper.validateLocation(location.url, 'urlMustContain')) {
+        if(!this.runtime.urlHelper.validateLocation(location.url, 'urlMustContain')) {
             return false;
         }
         if(this.isCanonicalAliasAlreadyProcessed(location)) {
@@ -346,9 +345,9 @@ export class Arachnodex {
             }
 
             // Wait for unlock before proceeding
-            await sharedLock.forUnlock();
+            await this.runtime.lock.forUnlock();
 
-            sharedLock.lock();
+            this.runtime.lock.lock();
             try {
                 if(!this.isFetchReady(location.url)) {
                     continue;
@@ -381,13 +380,13 @@ export class Arachnodex {
 
                 locationAdded = true;
             } finally {
-                sharedLock.unlock();
+                this.runtime.lock.unlock();
             }
         }
 
         // Notify Arachnodex that a new location has been added
         // so a worker can be assigned (Until max threads is reached)
-        eventBus.emit('new-locations-added');
+        this.runtime.events.emit('new-locations-added');
 
     }
 
@@ -463,8 +462,8 @@ export class Arachnodex {
     async retryLocationEvent(location: Location) {
         // Timeout retries deliberately remove the half-visited record so the next worker
         // performs a fresh request instead of treating the previous timeout as cached.
-        await sharedLock.forUnlock();
-        sharedLock.lock();
+        await this.runtime.lock.forUnlock();
+        this.runtime.lock.lock();
 
         try {
             if(this.visited[location.url]?.dataReceived === true) {
@@ -485,10 +484,10 @@ export class Arachnodex {
                 this.pending.push(location);
             }
         } finally {
-            sharedLock.unlock();
+            this.runtime.lock.unlock();
         }
 
-        eventBus.emit('new-locations-added');
+        this.runtime.events.emit('new-locations-added');
     }
 
     updateVisitedLocation(location: Location): void {
@@ -512,15 +511,15 @@ export class Arachnodex {
 
         // lock crawler during this loop
         // so we don't end up in a race condition.
-        await sharedLock.forUnlock();
-        sharedLock.lock();
+        await this.runtime.lock.forUnlock();
+        this.runtime.lock.lock();
 
         try {
             // Loop and spin up a crawler for each location listed in the pending array
             // until we run out of pending locations or thread limit is reached.
 
             while (this.pending.length > 0
-            && activeThreads.size < this.maxThreads) {
+            && this.runtime.activeThreads.size < this.maxThreads) {
 
                 // first in, first out
                 const location = this.pending[0] ?? undefined;
@@ -539,10 +538,10 @@ export class Arachnodex {
                         this.updateVisitedLocation(location);
 
                         // Create new worker thread
-                        const thread = new ArachnodexThread(this.threadCount++);
+                        const thread = new ArachnodexThread(this.threadCount++, this.runtime);
 
-                        // Add thread to activeThreads map.
-                        activeThreads.set(thread, {
+                        // Add thread to this.runtime.activeThreads map.
+                        this.runtime.activeThreads.set(thread, {
                             lastRequestTs: null,
                             inFlight: false,
                             claimed: false
@@ -558,18 +557,18 @@ export class Arachnodex {
             }
         } finally {
             // unlock crawler
-            sharedLock.unlock();
+            this.runtime.lock.unlock();
         }
 
-        if (activeThreads.size === this.maxThreads) {
+        if (this.runtime.activeThreads.size === this.maxThreads) {
             this.maxThreadsCreated = true;
-            eventBus.removeListener('new-locations-added');
+            this.runtime.events.removeListener('new-locations-added');
         }
     }
 
 
     workerInFlight(): boolean {
-        for(const [,state] of activeThreads) {
+        for(const [,state] of this.runtime.activeThreads) {
             if(state.inFlight) {
                 return true;
             }
@@ -604,11 +603,11 @@ export class Arachnodex {
             )
         ) {
             if(this.pending.length > 0) {
-                await sharedLock.forUnlock();
-                sharedLock.lock();
+                await this.runtime.lock.forUnlock();
+                this.runtime.lock.lock();
                 location = this.pending.shift();
                 this.pendingUrls.shift();
-                sharedLock.unlock();
+                this.runtime.lock.unlock();
             }
             if(location === undefined) {
                 // Execute loop again
@@ -638,7 +637,7 @@ export class Arachnodex {
             this.stats.totals.requestedHead++;
             this.stats.logs.requestedHead.push(location.url);
         } else {
-            activeThreads.delete(thread);
+            this.runtime.activeThreads.delete(thread);
             this.threadCount--;
         }
     }
@@ -673,7 +672,7 @@ export class Arachnodex {
             if (redirectUrl !== "") {
                 // Store redirect chain metadata on both the source and target locations so jobs
                 // can report the original link, the next hop, and later final-target health.
-                const redirectLocation = UrlHelper.createLocationFromLink(redirectUrl, location);
+                const redirectLocation = this.runtime.urlHelper.createLocationFromLink(redirectUrl, location);
                 if(redirectLocation) {
                     const redirectRoot = location.redirectRoot ?? location.url;
                     const redirectChain = [...(location.redirectChain ?? [location.url]), redirectLocation.url];
@@ -720,7 +719,7 @@ export class Arachnodex {
             }
             if(statusCode === 429) {
                 const e = new Error('HTTP 429 Received (Too fast!) - Increase request delay and try again.');
-                eventBus.emit('error', e, undefined, undefined, false, true);
+                this.runtime.events.emit('error', e, undefined, undefined, false, true);
             }
         } else {
             if(!this.muteResponseStatus) {
@@ -775,7 +774,7 @@ export class Arachnodex {
                     if (msg.includes('Could not parse CSS stylesheet')) {
                         // do nothing
                     } else {
-                        eventBus.emit('error', err, null, location);
+                        this.runtime.events.emit('error', err, null, location);
                     }
                 });
 
@@ -801,7 +800,7 @@ export class Arachnodex {
                                 ));
                             }
                             const canonLoc = decodedCanonical !== ''
-                                ? UrlHelper.createLocationFromLink(decodedCanonical, location)
+                                ? this.runtime.urlHelper.createLocationFromLink(decodedCanonical, location)
                                 : null;
                             if(canonLoc && this.isLocationInScope(canonLoc)) {
                                 canonLoc.referredAsCanonical = true;
@@ -826,13 +825,13 @@ export class Arachnodex {
                         }
 
                         if (href !== null && href !== '' && pageLink.parseWarnings === undefined) {
-                            const newLocation = UrlHelper.createLocationFromLink(decodeURIComponent(href).trim(), location);
+                            const newLocation = this.runtime.urlHelper.createLocationFromLink(decodeURIComponent(href).trim(), location);
                             const previewLocation = newLocation !== null ? {...newLocation} : null;
                             if(newLocation !== null
                                 && previewLocation !== null
-                                && UrlHelper.prepareUrl(previewLocation)
-                                && UrlHelper.validateLocation(previewLocation.url, 'urlCantContain')
-                                && UrlHelper.validateLocation(previewLocation.url, 'urlMustContain')
+                                && this.runtime.urlHelper.prepareUrl(previewLocation)
+                                && this.runtime.urlHelper.validateLocation(previewLocation.url, 'urlCantContain')
+                                && this.runtime.urlHelper.validateLocation(previewLocation.url, 'urlMustContain')
                             ) {
                                 pageLink.normalizedUrl = previewLocation.url;
                                 pageLink.isExternal = false;
@@ -854,7 +853,7 @@ export class Arachnodex {
 
                 } catch (e) {
                     const message = "An Error occurred while parsing page data!";
-                    eventBus.emit('error', e, message, location);
+                    this.runtime.events.emit('error', e, message, location);
                 }
             }
         }
@@ -888,11 +887,11 @@ export class Arachnodex {
 
     private getPreparedLocationUrl(location: Location): string|null {
         const preparedLocation = {...location};
-        if(!UrlHelper.prepareUrl(preparedLocation)) {
+        if(!this.runtime.urlHelper.prepareUrl(preparedLocation)) {
             return null;
         }
-        if(!UrlHelper.validateLocation(preparedLocation.url, 'urlCantContain')
-            || !UrlHelper.validateLocation(preparedLocation.url, 'urlMustContain')) {
+        if(!this.runtime.urlHelper.validateLocation(preparedLocation.url, 'urlCantContain')
+            || !this.runtime.urlHelper.validateLocation(preparedLocation.url, 'urlMustContain')) {
             return null;
         }
 
@@ -960,12 +959,12 @@ export class Arachnodex {
 
     private isLocationInScope(location: Location): boolean {
         const normalizedLocation = {...location};
-        if(!UrlHelper.prepareUrl(normalizedLocation)) {
+        if(!this.runtime.urlHelper.prepareUrl(normalizedLocation)) {
             return false;
         }
 
-        return UrlHelper.validateLocation(normalizedLocation.url, 'urlCantContain')
-            && UrlHelper.validateLocation(normalizedLocation.url, 'urlMustContain');
+        return this.runtime.urlHelper.validateLocation(normalizedLocation.url, 'urlCantContain')
+            && this.runtime.urlHelper.validateLocation(normalizedLocation.url, 'urlMustContain');
     }
 
     private isFilteredInternalUrl(url: URL): boolean {
@@ -977,12 +976,12 @@ export class Arachnodex {
             url: url.href,
             rawUrl: url.href
         };
-        if(!UrlHelper.prepareUrl(normalizedLocation)) {
+        if(!this.runtime.urlHelper.prepareUrl(normalizedLocation)) {
             return true;
         }
 
-        return !UrlHelper.validateLocation(normalizedLocation.url, 'urlCantContain')
-            || !UrlHelper.validateLocation(normalizedLocation.url, 'urlMustContain');
+        return !this.runtime.urlHelper.validateLocation(normalizedLocation.url, 'urlCantContain')
+            || !this.runtime.urlHelper.validateLocation(normalizedLocation.url, 'urlMustContain');
     }
 
     private isExternalUrl(url: URL): boolean {
@@ -1044,24 +1043,22 @@ export class Arachnodex {
             this.fatalShutdownStarted = true;
 
             // Stop all workers
-            sharedLock.lock(true);
+            this.runtime.lock.lock(true);
 
-            void this.sendFatalErrorReportAndExit();
+            this.fatalShutdownPromise = this.sendFatalErrorReport();
         }
     }
 
-    private async sendFatalErrorReportAndExit(): Promise<void> {
+    private async sendFatalErrorReport(): Promise<void> {
         try {
             this.profiler.mark('error-report-email', 'fatal error report email send starting');
-            await new ReportManager(this.profiler).sendErrorReport(this.errors, this.stats, this.jobs.jobs, true);
+            await new ReportManager(this.profiler, this.runtime.config).sendErrorReport(this.errors, this.stats, this.jobs.jobs, true);
             this.profiler.mark('error-report-email', 'fatal error report email send complete');
         } catch(e) {
             this.console.log('Fatal error report email failed to send.', 'red.bold');
             if(e instanceof Error) {
                 this.console.log(e.message, 'red');
             }
-        } finally {
-            process.exit(1);
         }
     }
 }

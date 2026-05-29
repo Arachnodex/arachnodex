@@ -1,6 +1,6 @@
 import { type AxiosResponse } from "axios";
 import type { LinkIssueSeverity, LinkZone, Location, PageData, ReportData } from "@arachnodex/core";
-import { BaseJob, OutputHelper, type JobCommandParser, type Profiler } from "@arachnodex/core";
+import { BaseJob, OutputHelper, type ArachnodexRuntime, type JobCommandParser, type Profiler } from "@arachnodex/core";
 export { default as CommandParser } from "./cmd.js";
 type LinkIssue = {
     severity: LinkIssueSeverity;
@@ -82,7 +82,7 @@ export default class LinkIssues extends BaseJob {
     includeNotices: boolean;
     includeExternal: boolean;
     promptOutput: boolean;
-    constructor(handle: string, command: JobCommandParser, profiler: Profiler);
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime);
     loadConfig(): void;
     shouldSendEmailReport(): boolean;
     getReportTitle(): string;

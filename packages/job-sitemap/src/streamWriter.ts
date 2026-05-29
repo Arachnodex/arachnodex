@@ -2,7 +2,8 @@
 import type {FileHandle} from "fs/promises";
 import {open} from "fs/promises";
 import {setTimeout} from "timers/promises";
-import {eventBus, type Location} from "@arachnodex/core";
+import type EventEmitter from "eventemitter3";
+import type {Location} from "@arachnodex/core";
 
 export class StreamWriter {
 
@@ -10,13 +11,15 @@ export class StreamWriter {
     outputFile: string;
     writeBuffer: string[] = [];
     writer?: FileHandle
+    events: EventEmitter;
 
     // Async helpers
     running = false;
     bufferFlushComplete = false;
 
-    constructor(outputFile: string) {
+    constructor(outputFile: string, events: EventEmitter) {
         this.outputFile = outputFile;
+        this.events = events;
         void this.init();
     }
 
@@ -90,7 +93,7 @@ export class StreamWriter {
 
     // Error helper
     emitFatal(e:Error, message: string, location?: Location) {
-        eventBus.emit(
+        this.events.emit(
             'error',
             e,
             message,

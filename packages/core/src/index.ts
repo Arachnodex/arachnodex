@@ -4,7 +4,9 @@ import {pathToFileURL} from "url";
 import {runApp} from "./app.js";
 
 export {runApp} from "./app.js";
+export {ArachnodexRuntime} from "./runtime.js";
 export {JobCommandParser} from "./command/jobCommandParser.js";
+export {CommandExit, isCommandExit} from "./command/commandExit.js";
 export {botProtectionHeuristics} from "@arachnodex/bot-protection-heuristics";
 export type {BotProtectionHeuristics} from "@arachnodex/bot-protection-heuristics";
 export type * from "./definitions.js";
@@ -18,5 +20,10 @@ export {defaultRequestHeaders} from "./services/requestHeaders.js";
 export {UrlHelper} from "./services/urlHelper.js";
 
 if(process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-    void runApp();
+    void runApp().then(statusCode => {
+        process.exitCode = statusCode;
+    }).catch(error => {
+        console.error(error);
+        process.exitCode = 1;
+    });
 }
