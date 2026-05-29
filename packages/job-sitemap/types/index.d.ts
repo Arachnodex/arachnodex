@@ -1,0 +1,36 @@
+import type { PageData, Location, ReportData } from "@arachnodex/core";
+import type { AxiosResponse } from "axios";
+import type { FileHandle } from 'fs/promises';
+import { BaseJob, type JobCommandParser, type Profiler } from "@arachnodex/core";
+import { StreamWriter } from "./streamWriter.js";
+export { default as CommandParser } from "./cmd.js";
+export default class Sitemap extends BaseJob {
+    name: string;
+    configRequired: boolean;
+    pageWriterFile: string;
+    docWriterFile: string;
+    pageWriter?: StreamWriter;
+    docWriter?: StreamWriter;
+    outputFile: string;
+    includeDocs: boolean;
+    includeDocPattern: RegExp;
+    includeOnlyCanonical: boolean;
+    pageUrlCount: number;
+    docUrlCount: number;
+    loggedUrls: string[];
+    constructor(handle: string, command: JobCommandParser, profiler: Profiler);
+    loadConfig(): void;
+    onInit(): void;
+    getLastModifiedHeader(r: AxiosResponse | null): string;
+    onHeadersReceived(_response: AxiosResponse | null, _location: Location): void;
+    onPageReceived(_response: AxiosResponse | null, _pageData: PageData): void;
+    addLocation(location: Location, lastModifiedHeader: string, nonPageDocument?: boolean): void;
+    private getLastModifiedDate;
+    private escapeXml;
+    getReportMessage(): string;
+    getReportData(): ReportData;
+    onEnd(): Promise<void>;
+    pipeData(writer: FileHandle, readFile: string): Promise<void>;
+    removeFile(filePath: string): void;
+    emitFatal(e?: Error | null, message?: string, location?: Location): void;
+}

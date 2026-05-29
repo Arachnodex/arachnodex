@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "Arachnodex core crawler runtime, shared APIs, and CLI.",
   "main": "bin/index.js",
+  "types": "types/index.d.ts",
   "bin": {
     "arachnodex": "./bin/index.js"
   },
   "type": "module",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "development": "./src/index.ts",
       "default": "./bin/index.js"
     },
@@ -20,12 +21,15 @@
   "files": [
     "config/*.example.json",
     "bin",
-    "src"
+    "src",
+    "types"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
-    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\"",
+    "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\" && npm run build:types",
     "lint": "eslint ./src/*.ts ./src/**/*.ts",
     "fix": "eslint ./src/**/*.ts --fix",
     "lint:watch": "chokidar src/*.ts src/jobs/*.ts -c \"npm run lint\" --initial --verbose",

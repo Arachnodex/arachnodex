@@ -4,9 +4,10 @@
   "description": "Arachnodex bot protection challenge detection heuristics.",
   "type": "module",
   "main": "bin/index.js",
+  "types": "types/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "development": "./src/index.ts",
       "default": "./bin/index.js"
     }
@@ -34,11 +35,14 @@
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "types"
   ],
   "scripts": {
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
-    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js"
+    "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js && npm run build:types"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

@@ -69,20 +69,24 @@ Example `package.json` for a scoped third-party job:
   "version": "1.0.0",
   "type": "module",
   "main": "bin/index.js",
+  "types": "types/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "development": "./src/index.ts",
       "default": "./bin/index.js"
     }
   },
   "files": [
     "bin",
-    "src"
+    "src",
+    "types"
   ],
   "scripts": {
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
-    "build": "npm run clean:bin && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js"
+    "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
+    "build:types": "tsc -p tsconfig.types.json",
+    "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js && npm run build:types"
   },
   "peerDependencies": {
     "@arachnodex/core": "^1.0.0"
@@ -100,6 +104,8 @@ Example `package.json` for a scoped third-party job:
 ```
 
 Use `peerDependencies` for `@arachnodex/core`. That lets npm warn users when a job expects a different core version without installing duplicate copies of core.
+
+The `types` export should point to generated declaration files for published packages. Keep the `development` export pointed at `src/index.ts` so source-mode development can run without rebuilding after every edit.
 
 Use a TypeScript config that matches Node ESM resolution. A standalone job can start with:
 
@@ -121,6 +127,25 @@ Use a TypeScript config that matches Node ESM resolution. A standalone job can s
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "bin"]
+}
+```
+
+Add a declaration-only config next to it:
+
+```json
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationMap": false,
+    "rootDir": "src",
+    "outDir": "types",
+    "stripInternal": true
+  },
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
+  "exclude": ["node_modules", "bin", "types"]
 }
 ```
 
@@ -399,7 +424,7 @@ During active development, you can run Arachnodex against TypeScript source inst
 {
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./types/index.d.ts",
       "development": "./src/index.ts",
       "default": "./bin/index.js"
     }
@@ -407,7 +432,7 @@ During active development, you can run Arachnodex against TypeScript source inst
 }
 ```
 
-The normal CLI uses the `default` export and loads `bin/index.js`. Source mode uses Node's `development` condition plus `tsx`, so package imports resolve to `src/index.ts`.
+The normal CLI uses the `default` export and loads `bin/index.js`. TypeScript consumers use the generated declaration files. Source mode uses Node's `development` condition plus `tsx`, so package imports resolve to `src/index.ts`.
 
 Install the local job and the TypeScript runner in the consuming Arachnodex project:
 
@@ -437,7 +462,7 @@ From the monorepo root, the `crawl-dev` script wraps that workspace command:
 npm run crawl-dev -- -j link-issues -n -e -p
 ```
 
-Use source mode for fast local iteration. Before publishing, packing, or opening a pull request that changes built packages, still run `npm run build` and commit the updated `bin/index.js`.
+Use source mode for fast local iteration. Before publishing, packing, or opening a pull request that changes built packages, still run `npm run build` and commit the updated `bin/index.js` and `types/` declarations.
 
 ## Using An Unscoped Local Package
 

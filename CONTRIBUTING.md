@@ -54,13 +54,13 @@ Published package metadata should use normal semver dependency ranges. Avoid com
 
 ## Build Output
 
-Packages build to `bin/index.js`. Before opening a PR, rebuild any package whose source changed:
+Packages build runtime bundles to `bin/index.js` and TypeScript declarations to `types/`. Before opening a PR, rebuild any package whose source changed:
 
 ```sh
 npm run build --workspaces --if-present
 ```
 
-The built `bin/` files are part of the package surface, so keep them in sync with source changes.
+The built `bin/` and `types/` files are part of the package surface, so keep them in sync with source changes.
 
 ## Checks
 
@@ -70,7 +70,7 @@ Run these from the repo root before submitting:
 npm run check
 ```
 
-That runs the package builds, TypeScript checks, ESLint, whitespace checks, and the built-file diff check that makes sure `bin/index.js` output was committed when source changed.
+That runs the package builds, TypeScript checks, ESLint, whitespace checks, and the built-file diff check that makes sure `bin/index.js` and `types/` output were committed when source changed.
 
 If a check fails because of something unrelated to your change, call that out in the pull request. Otherwise, please fix it before asking for review.
 

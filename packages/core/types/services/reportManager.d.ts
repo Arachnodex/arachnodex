@@ -1,0 +1,52 @@
+import type { MailOptions } from "nodemailer/lib/smtp-transport/index.js";
+import type { Transporter } from "nodemailer";
+import type { BaseJob } from "../jobs/baseJob.js";
+import type { CrawlerError, CrawlerStats } from "../definitions.js";
+import type { Profiler } from "./profiler.js";
+type JobReportTemplateData = {
+    jobHandle: string;
+    reportTitle: string;
+    reportMessage: string;
+    reportMessageHtml: string;
+    reportData: Array<{
+        label: string;
+        value: string;
+        valueHtml: string;
+    }>;
+    reportHtml: string;
+};
+export declare class ReportManager {
+    private logoDataUri?;
+    private readonly profiler;
+    private readonly console;
+    constructor(profiler: Profiler);
+    sendReport(stats: CrawlerStats, jobs: BaseJob[]): Promise<boolean>;
+    sendErrorReport(errors: CrawlerError[], stats: CrawlerStats, jobs: BaseJob[], fatalOnly?: boolean): Promise<boolean>;
+    isSendingAllowed(): boolean;
+    createMailer(): Transporter;
+    getJobReports(jobs: BaseJob[]): string[];
+    renderJobReport(templateFile: string, templateData: JobReportTemplateData): string;
+    getMailOptions(stats: CrawlerStats, jobReports: string[], jobs: BaseJob[]): MailOptions;
+    getErrorMailOptions(stats: CrawlerStats, errors: CrawlerError[], jobs: BaseJob[], fatalOnly: boolean): MailOptions;
+    private renderMainTemplate;
+    private sendMail;
+    private reportMailSetupError;
+    private mailOptionToString;
+    private renderSubject;
+    private renderErrorSubject;
+    private renderErrorTemplate;
+    private getReportableErrors;
+    private isSiteFindingError;
+    private formatErrorReportEntry;
+    private formatLocationDetails;
+    private getLogoDataUri;
+    private getResourcePath;
+    private formatRecipientMaps;
+    private formatRecipientMap;
+    private formatReportData;
+    private formatReportDataValue;
+    private htmlToText;
+    private linkifyHtml;
+    private escapeHtml;
+}
+export {};
