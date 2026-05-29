@@ -5,6 +5,7 @@ export interface JSONObject {
 }
 export type JSONArray = JSONValue[];
 export type RecipientMap = Record<string, string>;
+export type Recipient = string | RecipientMap;
 export type ObjectMap<T extends JSONObject = JSONObject> = Record<string, T>;
 export interface MailTransportTLS extends JSONObject {
     rejectUnauthorized?: boolean;
@@ -26,11 +27,11 @@ export interface RequestTlsConfig extends JSONObject {
 export interface MailConfig {
     disabled: boolean;
     defaultSubject: string;
-    developerRecipients: RecipientMap[];
-    reportRecipients: RecipientMap[];
-    errorRecipients: RecipientMap[];
-    from: RecipientMap;
-    replyTo: RecipientMap[];
+    developerRecipients: Recipient[];
+    reportRecipients: Recipient[];
+    errorRecipients: Recipient[];
+    from: Recipient;
+    replyTo: Recipient[];
     transport: MailTransportConfig;
 }
 export interface AppConfig {

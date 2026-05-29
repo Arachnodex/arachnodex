@@ -279,10 +279,11 @@ These values can be set in config or overridden by core switches.
 
 Mail is disabled by default. Enable it by setting `mail.disabled` to `false` and configuring recipients plus transport settings.
 
-Recipient lists use name-to-email maps:
+Recipient lists accept email strings or name-to-email maps:
 
 ```json
 [
+  "rick@example.com",
   {"Jane Developer": "jane@example.com"}
 ]
 ```
@@ -291,11 +292,11 @@ Recipient lists use name-to-email maps:
 | --- | --- | --- | --- |
 | `mail.disabled` | boolean | `true` | Disable regular and error report emails. |
 | `mail.defaultSubject` | string | `"Arachnodex {{domain}} Report [{{jobs}}]"` | Subject template for report emails. Supports `{{domain}}` and `{{jobs}}`. |
-| `mail.developerRecipients` | object[] | `[]` | Developer recipients that can receive crawler reports. |
-| `mail.reportRecipients` | object[] | `[]` | Recipients for regular completion reports. |
-| `mail.errorRecipients` | object[] | `[]` | Recipients for accumulated error reports. |
-| `mail.from` | object | `{}` | Sender name-to-email map. |
-| `mail.replyTo` | object[] | `[]` | Reply-to recipient maps. |
+| `mail.developerRecipients` | `(string \| object)[]` | `[]` | Developer recipients that can receive crawler reports. |
+| `mail.reportRecipients` | `(string \| object)[]` | `[]` | Recipients for regular completion reports. |
+| `mail.errorRecipients` | `(string \| object)[]` | `[]` | Recipients for accumulated error reports. |
+| `mail.from` | `string \| object` | `{}` | Sender email string or name-to-email map. |
+| `mail.replyTo` | `(string \| object)[]` | `[]` | Reply-to email strings or recipient maps. |
 
 Mail transport settings are passed to Nodemailer.
 

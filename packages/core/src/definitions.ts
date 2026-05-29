@@ -3,8 +3,9 @@ export type JSONValue = JSONPrimitive | JSONObject | JSONArray;
 export interface JSONObject { [key: string]: JSONValue | undefined }
 export type JSONArray = JSONValue[];
 
-// Simple name→email maps as used in your JSON
+// Simple name-to-email maps as used in JSON.
 export type RecipientMap = Record<string, string>;
+export type Recipient = string | RecipientMap;
 
 //export type ObjectMap = Record<string, JSONObject>;
 export type ObjectMap<T extends JSONObject = JSONObject> = Record<string, T>;
@@ -33,11 +34,11 @@ export interface RequestTlsConfig extends JSONObject {
 export interface MailConfig {
     disabled: boolean;
     defaultSubject: string;
-    developerRecipients: RecipientMap[]; // e.g., [{"First Last":"name@..."}]
-    reportRecipients: RecipientMap[];    // same shape as above
-    errorRecipients: RecipientMap[];     // same shape as above
-    from: RecipientMap;                  // same shape as above
-    replyTo: RecipientMap[];             // same shape as above
+    developerRecipients: Recipient[]; // e.g., ["name@..."] or [{"First Last":"name@..."}]
+    reportRecipients: Recipient[];    // same shape as above
+    errorRecipients: Recipient[];     // same shape as above
+    from: Recipient;                  // same shape as above
+    replyTo: Recipient[];             // same shape as above
     transport: MailTransportConfig;
 }
 

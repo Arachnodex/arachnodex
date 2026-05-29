@@ -18,7 +18,7 @@ import type {
     CrawlerStats,
     Location,
     MailTransportConfig,
-    RecipientMap,
+    Recipient,
     ReportData,
     ReportDataValue
 } from "../definitions.js";
@@ -202,9 +202,9 @@ export class ReportManager {
         const html = this.renderMainTemplate(stats, jobReports, jobs, subject);
 
         return {
-            from: this.formatRecipientMap(this.config.getConfigValue<RecipientMap>('mail.from', null, {})),
-            to: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])),
-            replyTo: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
+            from: this.formatRecipientMap(this.config.getConfigValue<Recipient>('mail.from', null, {})),
+            to: this.formatRecipientMaps(this.config.getConfigValue<Recipient[]>('mail.reportRecipients', null, [])),
+            replyTo: this.formatRecipientMaps(this.config.getConfigValue<Recipient[]>('mail.replyTo', null, [])),
             subject,
             html,
             text: this.htmlToText(html)
@@ -220,21 +220,21 @@ export class ReportManager {
         const subject = this.renderErrorSubject(errors, jobs, fatalOnly);
         const html = this.renderErrorTemplate(stats, errors, jobs, subject, fatalOnly);
         const errorRecipients = this.formatRecipientMaps(
-            this.config.getConfigValue<RecipientMap[]>('mail.errorRecipients', null, [])
+            this.config.getConfigValue<Recipient[]>('mail.errorRecipients', null, [])
         );
         const developerRecipients = this.formatRecipientMaps(
-            this.config.getConfigValue<RecipientMap[]>('mail.developerRecipients', null, [])
+            this.config.getConfigValue<Recipient[]>('mail.developerRecipients', null, [])
         );
         const finalFallbackRecipients = this.formatRecipientMaps(
-            this.config.getConfigValue<RecipientMap[]>('mail.reportRecipients', null, [])
+            this.config.getConfigValue<Recipient[]>('mail.reportRecipients', null, [])
         );
 
         return {
-            from: this.formatRecipientMap(this.config.getConfigValue<RecipientMap>('mail.from', null, {})),
+            from: this.formatRecipientMap(this.config.getConfigValue<Recipient>('mail.from', null, {})),
             to: errorRecipients !== ''
                 ? errorRecipients
                 : (developerRecipients !== '' ? developerRecipients : finalFallbackRecipients),
-            replyTo: this.formatRecipientMaps(this.config.getConfigValue<RecipientMap[]>('mail.replyTo', null, [])),
+            replyTo: this.formatRecipientMaps(this.config.getConfigValue<Recipient[]>('mail.replyTo', null, [])),
             subject,
             html,
             text: this.htmlToText(html)
@@ -412,14 +412,18 @@ export class ReportManager {
         return resolve(resourceBase, fileName);
     }
 
-    private formatRecipientMaps(recipients: RecipientMap[]): string {
+    private formatRecipientMaps(recipients: Recipient[]): string {
         return recipients
             .map(recipient => this.formatRecipientMap(recipient))
             .filter(recipient => recipient !== '')
             .join(', ');
     }
 
-    private formatRecipientMap(recipient: RecipientMap): string {
+    private formatRecipientMap(recipient: Recipient): string {
+        if(typeof recipient === 'string') {
+            return recipient;
+        }
+
         const entries = Object.entries(recipient);
         if(entries.length === 0) {
             return '';

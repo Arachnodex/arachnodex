@@ -17,6 +17,25 @@ function isJSONArray(v: unknown): v is JSONArray {
     return Array.isArray(v);
 }
 
+function isRecipient(v: unknown): boolean {
+    if(typeof v === 'string') {
+        return true;
+    }
+    return isRecord(v) && Object.values(v).every(value => typeof value === 'string');
+}
+
+function assertRecipient(v: unknown, path: string): void {
+    if(!isRecipient(v)) {
+        throw new Error(`${path} must be string or string-valued object`);
+    }
+}
+
+function assertRecipientArray(v: unknown, path: string): void {
+    if(!Array.isArray(v) || !v.every(isRecipient)) {
+        throw new Error(`${path} must be an array of strings or string-valued objects`);
+    }
+}
+
 function assertAppConfig(v: unknown): asserts v is AppConfigInput {
     if (!isRecord(v)) throw new Error('Config must be an object');
     if (typeof v.siteName !== 'string') throw new Error('siteName must be string');
@@ -50,6 +69,21 @@ function assertAppConfig(v: unknown): asserts v is AppConfigInput {
     if (typeof v.treatHashAsUniquePage !== 'undefined' && typeof v.treatHashAsUniquePage !== 'boolean') throw new Error('treatHashAsUniquePage must be boolean');
     if (typeof v.mail !== 'undefined') {
         if (!isRecord(v.mail)) throw new Error('mail must be object');
+        if (typeof v.mail.developerRecipients !== 'undefined') {
+            assertRecipientArray(v.mail.developerRecipients, 'mail.developerRecipients');
+        }
+        if (typeof v.mail.reportRecipients !== 'undefined') {
+            assertRecipientArray(v.mail.reportRecipients, 'mail.reportRecipients');
+        }
+        if (typeof v.mail.errorRecipients !== 'undefined') {
+            assertRecipientArray(v.mail.errorRecipients, 'mail.errorRecipients');
+        }
+        if (typeof v.mail.from !== 'undefined') {
+            assertRecipient(v.mail.from, 'mail.from');
+        }
+        if (typeof v.mail.replyTo !== 'undefined') {
+            assertRecipientArray(v.mail.replyTo, 'mail.replyTo');
+        }
         if (typeof v.mail.transport !== 'undefined') {
             if (!isRecord(v.mail.transport)) throw new Error('mail.transport must be object');
             if (typeof v.mail.transport.auth !== 'undefined') {
