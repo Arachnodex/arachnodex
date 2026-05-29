@@ -15,6 +15,8 @@ Official Arachnodex jobs can use short handles:
 -j link-issues -> @arachnodex/job-link-issues
 ```
 
+Those short handles only resolve the package name. The matching job package still has to be installed in the consuming Arachnodex project or in the same global environment as `@arachnodex/core`.
+
 Third-party jobs should use their real npm package name. Scoped packages load exactly:
 
 ```sh

@@ -8,10 +8,16 @@ export declare class StreamWriter {
     events: EventEmitter;
     running: boolean;
     bufferFlushComplete: boolean;
+    readonly ready: Promise<void>;
+    private flushPromise?;
+    private failed;
+    private fatalEmitted;
     constructor(outputFile: string, events: EventEmitter);
     init(): Promise<void>;
     flushBuffer(): Promise<void>;
     write(entry: string): void;
     terminate(): Promise<void>;
+    hasFailed(): boolean;
     emitFatal(e: Error, message: string, location?: Location): void;
+    private emitFatalOnce;
 }

@@ -9,6 +9,7 @@ import {Lock} from "./lib/lock.js";
 import {Mutex} from "./lib/mutex.js";
 
 export class ArachnodexRuntime {
+    private readonly abortController = new AbortController();
     readonly events = new EventEmitter();
     readonly config = new ConfigLoader();
     readonly urlHelper = new UrlHelperService(this.config);
@@ -17,7 +18,22 @@ export class ArachnodexRuntime {
     readonly turnMutex = new Mutex();
     throttledRequestCount = 0;
 
+    get abortSignal(): AbortSignal {
+        return this.abortController.signal;
+    }
+
+    get aborted(): boolean {
+        return this.abortController.signal.aborted;
+    }
+
+    abort(reason = 'Arachnodex runtime aborted.'): void {
+        if(!this.abortController.signal.aborted) {
+            this.abortController.abort(reason);
+        }
+    }
+
     dispose(): void {
+        this.abort('Arachnodex runtime disposed.');
         this.activeThreads.clear();
         this.events.removeAllListeners();
     }

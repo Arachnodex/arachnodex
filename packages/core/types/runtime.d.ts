@@ -6,6 +6,7 @@ import { UrlHelperService } from "./services/urlHelper.js";
 import { Lock } from "./lib/lock.js";
 import { Mutex } from "./lib/mutex.js";
 export declare class ArachnodexRuntime {
+    private readonly abortController;
     readonly events: EventEmitter<string | symbol, any>;
     readonly config: ConfigLoader;
     readonly urlHelper: UrlHelperService;
@@ -13,5 +14,8 @@ export declare class ArachnodexRuntime {
     readonly lock: Lock;
     readonly turnMutex: Mutex;
     throttledRequestCount: number;
+    get abortSignal(): AbortSignal;
+    get aborted(): boolean;
+    abort(reason?: string): void;
     dispose(): void;
 }

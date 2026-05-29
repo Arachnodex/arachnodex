@@ -212,6 +212,9 @@ export default class Sitemap extends BaseJob {
         // Flush temp writers before merging so all buffered URLs are present on disk.
         await this.pageWriter?.terminate();
         await this.docWriter?.terminate();
+        if(this.pageWriter?.hasFailed() === true || this.docWriter?.hasFailed() === true) {
+            return;
+        }
 
         // Remove existing sitemap file if it exists
         if (fse.pathExistsSync(this.outputFile)) {

@@ -16,79 +16,99 @@ export class StreamWriter {
     // Async helpers
     running = false;
     bufferFlushComplete = false;
+    readonly ready: Promise<void>;
+    private flushPromise?: Promise<void>;
+    private failed = false;
+    private fatalEmitted = false;
 
     constructor(outputFile: string, events: EventEmitter) {
         this.outputFile = outputFile;
         this.events = events;
-        void this.init();
+        this.ready = this.init();
     }
 
-    async init() {
+    async init(): Promise<void> {
         try {
             this.writer = await open(this.outputFile, 'w');
         } catch(e) {
-            this.emitFatal(
+            this.failed = true;
+            this.bufferFlushComplete = true;
+            this.emitFatalOnce(
                 e instanceof Error ? e : new Error('Unspecified Error'),
                 `[sitemap] Unable to create write stream to '${this.outputFile}'!`
             );
+            return;
         }
 
-        await this.flushBuffer();
+        this.flushPromise = this.flushBuffer();
     }
 
     async flushBuffer() {
 
         this.running = true;
+        try {
+            while ((this.running || this.writeBuffer.length > 0) && !this.failed) {
 
-        while (this.running || this.writeBuffer.length > 0) {
+                // If there is nothing to write wait a bit before recycling the loop
+                if(this.writeBuffer.length === 0) {
+                    await setTimeout(150);
+                    continue;
+                }
 
-            // If there is nothing to write wait a bit before recycling the loop
-            if(this.writeBuffer.length === 0) {
-                await setTimeout(150);
-                continue;
-            }
+                // clone and clear write buffer
+                const data = [...this.writeBuffer];
+                this.writeBuffer = [];
 
-            // clone and clear write buffer
-            const data = [...this.writeBuffer];
-            this.writeBuffer = [];
-
-            // write the string buffer data to the stream
-            // sets this.
-            try {
                 if(typeof this.writer === 'undefined') {
-                    // noinspection ExceptionCaughtLocallyJS
                     throw new Error('FS FileHandle not open for writing.');
                 }
+
                 await this.writer.write(data.join(''));
-            } catch(e) {
+            }
+        } catch(e) {
+            this.failed = true;
+            this.emitFatalOnce(
+                e instanceof Error ? e : new Error('Unspecified Error'),
+                `[sitemap] Couldn't write data stream to '${this.outputFile}'!`
+            );
+        } finally {
+            this.running = false;
+            try {
                 await this.writer?.close();
-                this.emitFatal(
+            } catch(e) {
+                this.failed = true;
+                this.emitFatalOnce(
                     e instanceof Error ? e : new Error('Unspecified Error'),
-                    `[sitemap] Couldn't write data stream to '${this.outputFile}'!`
+                    `[sitemap] Couldn't close data stream to '${this.outputFile}'!`
                 );
             }
+            this.bufferFlushComplete = true;
         }
-
-        // Close stream
-        await this.writer?.close();
-
-        // Signal write completion
-        this.bufferFlushComplete = true;
 
     }
 
     write(entry: string) {
+        if(this.failed) {
+            return;
+        }
+
         this.writeBuffer.push(entry);
     }
 
     async terminate() {
+        await this.ready;
         this.running = false;
+        await this.flushPromise;
 
         // wait for writing complete
         while (!this.bufferFlushComplete) {
             await setTimeout(150);
         }
 
+    }
+
+    hasFailed(): boolean {
+        return this.failed;
     }
 
     // Error helper
@@ -100,5 +120,14 @@ export class StreamWriter {
             location,
             false,
             true);
+    }
+
+    private emitFatalOnce(e: Error, message: string, location?: Location): void {
+        if(this.fatalEmitted) {
+            return;
+        }
+
+        this.fatalEmitted = true;
+        this.emitFatal(e, message, location);
     }
 }

@@ -171,6 +171,7 @@ export class Arachnodex {
 
         if(this.fatalShutdownStarted) {
             await this.fatalShutdownPromise;
+            await this.waitForActiveThreadsToSettle();
             return 1;
         }
 
@@ -312,6 +313,9 @@ export class Arachnodex {
     // LOCATION QUEUE MANAGEMENT
     // =========================
     async addNewLocation(location: Location) {
+        if(this.runtime.aborted) {
+            return false;
+        }
 
         // Normalize and filter before touching shared queue state.
         if (!this.runtime.urlHelper.prepareUrl(location)) {
@@ -346,6 +350,9 @@ export class Arachnodex {
 
             // Wait for unlock before proceeding
             await this.runtime.lock.forUnlock();
+            if(this.runtime.aborted) {
+                return false;
+            }
 
             this.runtime.lock.lock();
             try {
@@ -460,9 +467,16 @@ export class Arachnodex {
     }
 
     async retryLocationEvent(location: Location) {
+        if(this.runtime.aborted) {
+            return;
+        }
+
         // Timeout retries deliberately remove the half-visited record so the next worker
         // performs a fresh request instead of treating the previous timeout as cached.
         await this.runtime.lock.forUnlock();
+        if(this.runtime.aborted) {
+            return;
+        }
         this.runtime.lock.lock();
 
         try {
@@ -508,10 +522,16 @@ export class Arachnodex {
     // Responsible for spinning up crawler workers as new URLs are added to the queue.
     // Once the configured worker limit exists, workers recycle themselves through threadReadyEvent.
     async locationsAddedEvent() {
+        if(this.runtime.aborted) {
+            return;
+        }
 
         // lock crawler during this loop
         // so we don't end up in a race condition.
         await this.runtime.lock.forUnlock();
+        if(this.runtime.aborted) {
+            return;
+        }
         this.runtime.lock.lock();
 
         try {
@@ -583,6 +603,12 @@ export class Arachnodex {
     // Manage workers as they finish work by issuing the next URL. The wait loop gives
     // in-flight workers a short window to discover more links before a worker exits.
     async threadReadyEvent(thread: ArachnodexThread) {
+        if(this.runtime.aborted) {
+            if(this.runtime.activeThreads.delete(thread)) {
+                this.threadCount = Math.max(0, this.threadCount - 1);
+            }
+            return;
+        }
 
         this.crawlStarted = true;
 
@@ -604,6 +630,12 @@ export class Arachnodex {
         ) {
             if(this.pending.length > 0) {
                 await this.runtime.lock.forUnlock();
+                if(this.runtime.aborted) {
+                    if(this.runtime.activeThreads.delete(thread)) {
+                        this.threadCount = Math.max(0, this.threadCount - 1);
+                    }
+                    return;
+                }
                 this.runtime.lock.lock();
                 location = this.pending.shift();
                 this.pendingUrls.shift();
@@ -1042,10 +1074,18 @@ export class Arachnodex {
             }
             this.fatalShutdownStarted = true;
 
-            // Stop all workers
+            // Stop all workers and cancel in-flight requests.
+            this.runtime.abort(error.message);
             this.runtime.lock.lock(true);
 
             this.fatalShutdownPromise = this.sendFatalErrorReport();
+        }
+    }
+
+    private async waitForActiveThreadsToSettle(): Promise<void> {
+        const deadline = Date.now() + 5000;
+        while(this.runtime.activeThreads.size > 0 && Date.now() < deadline) {
+            await sleep(pollMsExt);
         }
     }
 

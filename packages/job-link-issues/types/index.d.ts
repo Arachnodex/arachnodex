@@ -170,6 +170,7 @@ export default class LinkIssues extends BaseJob {
     private getExternalRequestConfig;
     private runExternalRequest;
     private shouldRetryExternalRequest;
+    private isAbortError;
     private isBotProtectionResponse;
     private getHeaderText;
     private auditCanonical;

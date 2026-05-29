@@ -1965,7 +1965,8 @@ export default class LinkIssues extends BaseJob {
                 timeout: externalCheckTimeoutMs,
                 requestCert: false,
                 rejectUnauthorized: this.config.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
-            })
+            }),
+            signal: this.runtime.abortSignal
         };
 
         const externalLinks = Array.from(this.externalLinks.values());
@@ -1977,7 +1978,7 @@ export default class LinkIssues extends BaseJob {
         const workers = Array.from(
             {length: Math.min(externalCheckConcurrency, externalLinks.length)},
             async () => {
-                while(index < externalLinks.length) {
+                while(index < externalLinks.length && !this.runtime.aborted) {
                     const externalLink = externalLinks[index++];
                     const startedAt = Date.now();
                     await this.auditExternalLinkWithTimeout(externalLink, config);
@@ -2001,9 +2002,13 @@ export default class LinkIssues extends BaseJob {
         }, externalCheckUrlTimeoutMs);
 
         try {
+            const signals = [controller.signal];
+            if(typeof config.signal !== 'undefined') {
+                signals.push(config.signal as AbortSignal);
+            }
             await this.auditExternalLink(externalLink, {
                 ...config,
-                signal: controller.signal
+                signal: AbortSignal.any(signals)
             });
         } finally {
             clearTimeout(timeout);
@@ -2022,6 +2027,10 @@ export default class LinkIssues extends BaseJob {
                 return;
             }
         } catch (e) {
+            if(this.runtime.aborted && this.isAbortError(e)) {
+                return;
+            }
+
             if(axios.isAxiosError(e) && typeof e.response !== 'undefined') {
                 if(this.isBotProtectionResponse(e.response)) {
                     return;
@@ -2270,7 +2279,13 @@ export default class LinkIssues extends BaseJob {
     }
 
     private shouldRetryExternalRequest(error: unknown): boolean {
-        return axios.isAxiosError(error) && typeof error.response === 'undefined';
+        return axios.isAxiosError(error)
+            && typeof error.response === 'undefined'
+            && !this.isAbortError(error);
+    }
+
+    private isAbortError(error: unknown): boolean {
+        return axios.isAxiosError(error) && error.code === 'ERR_CANCELED';
     }
 
     private isBotProtectionResponse(response: AxiosResponse<unknown>): boolean {

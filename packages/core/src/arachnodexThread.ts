@@ -41,6 +41,10 @@ export class ArachnodexThread {
         let done = false;
 
         do {
+            if(this.runtime.aborted) {
+                return;
+            }
+
             const myState = this.runtime.activeThreads.get(this);
 
             if (myState === undefined) {
@@ -57,7 +61,7 @@ export class ArachnodexThread {
             }
 
             if (someoneElseClaimed) {
-                await sleep(pollMs);
+                await this.sleep(pollMs);
                 continue;
             }
 
@@ -99,13 +103,13 @@ export class ArachnodexThread {
             }
 
             if (nullIdleBeforeMe) {
-                await sleep(pollMs);
+                await this.sleep(pollMs);
                 continue;
             }
 
             const waitTime = Math.max(0, this.requestDelay - (Date.now() - latestRequest));
             if (waitTime > 0) {
-                await sleep(waitTime);
+                await this.sleep(waitTime);
                 continue;
             }
 
@@ -118,7 +122,7 @@ export class ArachnodexThread {
                 || oldestIdleThread === null;
 
             if (!eligible) {
-                await sleep(pollMs);
+                await this.sleep(pollMs);
                 continue;
             }
 
@@ -144,13 +148,17 @@ export class ArachnodexThread {
             }
 
             if (!done) {
-                await sleep(pollMs);
+                await this.sleep(pollMs);
             }
 
         } while (!done);
     }
 
     async fetch(location:Location, visited:Record<string, Location>) {
+        if(this.runtime.aborted) {
+            this.runtime.events.emit('thread-ready', this);
+            return;
+        }
 
         // Replayed referers use cached status metadata. Jobs still receive events so they
         // can attribute the same broken URL to multiple source pages.
@@ -199,11 +207,15 @@ export class ArachnodexThread {
             // Claiming happens under a small mutex so exactly one worker can pass the
             // request-delay gate and mark itself in flight.
             await this.waitTurn();
+            if(this.runtime.aborted) {
+                this.runtime.events.emit('thread-ready', this);
+                return;
+            }
             const release = await this.runtime.turnMutex.acquire();
             try {
                 this.runtime.throttledRequestCount++;
                 if(this.runtime.throttledRequestCount % 100 === 0) {
-                    await sleep(2000);
+                    await this.sleep(2000);
                 }
                 state.claimed = false;
                 state.inFlight = true;
@@ -227,6 +239,7 @@ export class ArachnodexThread {
             const config: AxiosRequestConfig = {
                 maxRedirects: 0,
                 timeout: this.requestTimeout,
+                signal: this.runtime.abortSignal,
                 headers: {
                     ...defaultRequestHeaders
                 }
@@ -244,8 +257,14 @@ export class ArachnodexThread {
 
             // this will throw and error for all non-successful response codes!
             const response: AxiosResponse<void> = await axios.head<void>(location.url, config);
+            if(this.runtime.aborted) {
+                return;
+            }
 
             await this.runtime.lock.forUnlock();
+            if(this.runtime.aborted) {
+                return;
+            }
             this.runtime.lock.lock();
             locationFinal = {...location};
             if(response?.status > 0) {
@@ -272,8 +291,14 @@ export class ArachnodexThread {
                 config.maxRedirects = 0;
                 requestPhase = 'data';
                 const dataResponse = await axios.get(location.url, config);
+                if(this.runtime.aborted) {
+                    return;
+                }
 
                 await this.runtime.lock.forUnlock();
+                if(this.runtime.aborted) {
+                    return;
+                }
                 this.runtime.lock.lock();
                 if(typeof visited[location.url] !== 'undefined') {
                     visited[location.url].dataReceived = true;
@@ -285,6 +310,9 @@ export class ArachnodexThread {
             }
 
         } catch(nonSuccessResponseError) {
+            if(this.runtime.aborted) {
+                return;
+            }
 
             const timeoutSeconds = this.requestTimeout / 1000;
             const noResponseMessage = requestPhase === 'data'
@@ -298,6 +326,9 @@ export class ArachnodexThread {
                 // that falls out of the range of 2xx
                 if(statusCode === undefined) {
                     await this.runtime.lock.forUnlock();
+                    if(this.runtime.aborted) {
+                        return;
+                    }
                     this.runtime.lock.lock();
                     locationFinal = {...location};
                     if(nonSuccessResponseError.response?.status > 0) {
@@ -371,6 +402,20 @@ export class ArachnodexThread {
 
     private shouldRetryTimeout(location: Location): boolean {
         return (location.retryAttempt ?? 0) < this.requestTimeoutMaxRetries;
+    }
+
+    private async sleep(ms: number): Promise<void> {
+        if(this.runtime.aborted) {
+            return;
+        }
+
+        try {
+            await sleep(ms, undefined, {signal: this.runtime.abortSignal});
+        } catch(e) {
+            if(!this.runtime.aborted) {
+                throw e;
+            }
+        }
     }
 
     private async queueRetryLocation(location: Location): Promise<void> {

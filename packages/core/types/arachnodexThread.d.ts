@@ -13,5 +13,6 @@ export declare class ArachnodexThread {
     fetch(location: Location, visited: Record<string, Location>): Promise<void>;
     private isTimeoutError;
     private shouldRetryTimeout;
+    private sleep;
     private queueRetryLocation;
 }

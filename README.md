@@ -63,6 +63,14 @@ npm install @arachnodex/job-sitemap
 npm exec -- arachnodex -c default -j sitemap
 ```
 
+## Package Boundaries
+
+`@arachnodex/core` provides the crawler runtime, shared APIs, and the `arachnodex` CLI. It does not bundle official jobs.
+
+Job handles such as `sitemap` and `link-issues` are shorthand import names. They resolve to `@arachnodex/job-sitemap` and `@arachnodex/job-link-issues`, but those packages must be installed in the current local project or in the same global environment as the CLI.
+
+`npm create @arachnodex` installs the default official jobs for generated projects. Manual and global installs should add whichever official or third-party job packages they plan to run.
+
 ## Basic Usage
 
 Arachnodex reads JSON config files from `config/`. The default crawler config is:

@@ -9,7 +9,7 @@ export class Lock {
     constructor(private readonly events: EventEmitter | null = null) {}
 
     async forUnlock() : Promise<void> {
-        while (this.locked) {
+        while (this.locked && !this.hardLocked) {
             await sleep(25);
         }
     }

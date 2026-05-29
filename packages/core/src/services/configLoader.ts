@@ -3,7 +3,9 @@
 // Load Dependencies
 import fse from 'fs-extra'
 import type {BaseCommandParser} from "../command/baseCommandParser.js";
-import type {AppConfig, JSONObject, JSONArray, JSONPrimitive, JSONValue} from '../definitions.ts';
+import type {AppConfig, JSONObject, JSONArray, JSONPrimitive, JSONValue, DeepPartial} from '../definitions.ts';
+
+type AppConfigInput = DeepPartial<AppConfig> & Pick<AppConfig, 'siteName' | 'domain' | 'baseUrl'>;
 
 function isRecord(v: unknown): v is Record<string, unknown> {
     return typeof v === 'object' && v !== null;
@@ -15,7 +17,7 @@ function isJSONArray(v: unknown): v is JSONArray {
     return Array.isArray(v);
 }
 
-function assertAppConfig(v: unknown): asserts v is AppConfig {
+function assertAppConfig(v: unknown): asserts v is AppConfigInput {
     if (!isRecord(v)) throw new Error('Config must be an object');
     if (typeof v.siteName !== 'string') throw new Error('siteName must be string');
     if (typeof v.domain !== 'string') throw new Error('domain must be string');
@@ -29,7 +31,8 @@ function assertAppConfig(v: unknown): asserts v is AppConfig {
     if (typeof v.requestTimeoutMaxRetries !== 'undefined' && typeof v.requestTimeoutMaxRetries !== 'number') throw new Error('requestTimeoutMaxRetries must be number');
     if (typeof v.requestTls !== 'undefined') {
         if (!isRecord(v.requestTls)) throw new Error('requestTls must be object');
-        if (typeof v.requestTls.rejectUnauthorized !== 'boolean') {
+        if (typeof v.requestTls.rejectUnauthorized !== 'undefined'
+            && typeof v.requestTls.rejectUnauthorized !== 'boolean') {
             throw new Error('requestTls.rejectUnauthorized must be boolean');
         }
     }
@@ -45,7 +48,30 @@ function assertAppConfig(v: unknown): asserts v is AppConfig {
         throw new Error('urlMustContain must be string[]');
     }
     if (typeof v.treatHashAsUniquePage !== 'undefined' && typeof v.treatHashAsUniquePage !== 'boolean') throw new Error('treatHashAsUniquePage must be boolean');
-    if (typeof v.mail !== 'undefined' && !isRecord(v.mail)) throw new Error('mail must be object');
+    if (typeof v.mail !== 'undefined') {
+        if (!isRecord(v.mail)) throw new Error('mail must be object');
+        if (typeof v.mail.transport !== 'undefined') {
+            if (!isRecord(v.mail.transport)) throw new Error('mail.transport must be object');
+            if (typeof v.mail.transport.auth !== 'undefined') {
+                if (!isRecord(v.mail.transport.auth)) throw new Error('mail.transport.auth must be object');
+                if (typeof v.mail.transport.auth.username !== 'undefined'
+                    && typeof v.mail.transport.auth.username !== 'string') {
+                    throw new Error('mail.transport.auth.username must be string');
+                }
+                if (typeof v.mail.transport.auth.password !== 'undefined'
+                    && typeof v.mail.transport.auth.password !== 'string') {
+                    throw new Error('mail.transport.auth.password must be string');
+                }
+            }
+            if (typeof v.mail.transport.tls !== 'undefined') {
+                if (!isRecord(v.mail.transport.tls)) throw new Error('mail.transport.tls must be object');
+                if (typeof v.mail.transport.tls.rejectUnauthorized !== 'undefined'
+                    && typeof v.mail.transport.tls.rejectUnauthorized !== 'boolean') {
+                    throw new Error('mail.transport.tls.rejectUnauthorized must be boolean');
+                }
+            }
+        }
+    }
 }
 
 function readJsonUnknown(file: string): unknown {
@@ -146,10 +172,12 @@ export class ConfigLoader {
         if (fse.pathExistsSync(configFile)) {
             const u = readJsonUnknown(configFile);
             assertAppConfig(u);
-            const fileCfg: AppConfig = u;
+            const fileCfg: AppConfigInput = u;
             const fileMail = isRecord(fileCfg.mail) ? fileCfg.mail : {};
             const fileTransport = isRecord(fileCfg.mail?.transport) ? fileCfg.mail.transport : {};
-            let appConfig = {
+            const fileAuth = isRecord(fileCfg.mail?.transport?.auth) ? fileCfg.mail.transport.auth : {};
+            const fileTls = isRecord(fileCfg.mail?.transport?.tls) ? fileCfg.mail.transport.tls : {};
+            let appConfig: AppConfig = {
                 ...defaults,
                 ...fileCfg,
                 requestTls: {
@@ -161,16 +189,24 @@ export class ConfigLoader {
                     ...fileMail,
                     transport: {
                         ...defaults.mail.transport,
-                        ...fileTransport
+                        ...fileTransport,
+                        auth: {
+                            ...defaults.mail.transport.auth,
+                            ...fileAuth
+                        },
+                        tls: {
+                            ...defaults.mail.transport.tls,
+                            ...fileTls
+                        }
                     }
                 }
-            };
+            } as AppConfig;
             if(typeof command !== 'undefined') {
                 appConfig = this.applyCommandConfigOverrides(appConfig, command);
             }
             this.appConfig = appConfig;
             this.appConfigName = configName;
-            return this.appConfig;
+            return appConfig;
         }
 
         throw new Error('No application config loaded.');
@@ -240,13 +276,13 @@ export class ConfigLoader {
 
 
     // Overwrite (or create) config data at the supplied path
-    setConfigValue<T extends JSONObject>(
+    setConfigValue<T extends object>(
         configData: T,
         configPath: string,
         value: JSONPrimitive
     ): T {
         // Clone current config so we can mutate safely
-        const next: JSONObject | AppConfig = structuredClone(configData);
+        const next = structuredClone(configData) as Record<string, unknown>;
 
         const parts = configPath.split('.').filter(Boolean);
         if (parts.length > 0) {
@@ -278,7 +314,7 @@ export class ConfigLoader {
         return next as unknown as T;
     }
 
-    private applyCommandConfigOverrides<T extends JSONObject>(configData: T, command: BaseCommandParser): T {
+    private applyCommandConfigOverrides<T extends object>(configData: T, command: BaseCommandParser): T {
         let next = configData;
         const seen = new Set<unknown>();
         for (const i in command.arguments) {
