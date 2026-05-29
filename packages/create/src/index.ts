@@ -10,7 +10,7 @@ type ScaffoldConfig = {
 }
 
 const packageDependencies = {
-    "@arachnodex/core": "^1.0.1",
+    "@arachnodex/core": "^1.0.2",
     "@arachnodex/job-link-issues": "^1.0.1",
     "@arachnodex/job-sitemap": "^1.0.1"
 };
@@ -51,7 +51,7 @@ function main(): void {
     if(!config.install) {
         console.log("  npm install");
     }
-    console.log("  npm run crawl");
+    console.log("  npm run crawl:default");
 }
 
 function parseArgs(args: string[]): ScaffoldConfig {
@@ -111,8 +111,10 @@ function writeProjectPackageJson(targetDir: string): void {
         private: true,
         type: "module",
         scripts: {
-            crawl: "arachnodex -c default -j sitemap -j link-issues",
-            "crawl:src": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts -c default -j sitemap -j link-issues"
+            crawl: "arachnodex",
+            "crawl:default": "arachnodex -c default -j sitemap -j link-issues",
+            "crawl:src": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts",
+            "crawl:src:default": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts -c default -j sitemap -j link-issues"
         },
         dependencies: packageDependencies,
         devDependencies: packageDevDependencies

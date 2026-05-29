@@ -30,10 +30,10 @@ The recommended path is the create command:
 ```sh
 npm create @arachnodex my-crawl-project
 cd my-crawl-project
-npm run crawl
+npm run crawl:default
 ```
 
-That initializes a runnable project with local `README.md`, `package.json`, and `config/` files, installs the core crawler and official jobs, and adds `crawl` and `crawl:src` scripts.
+That initializes a runnable project with local `README.md`, `package.json`, and `config/` files, installs the core crawler and official jobs, and adds pass-through `crawl` / `crawl:src` scripts plus default starter scripts.
 
 You can skip automatic install if you want to inspect or edit files first:
 
@@ -103,16 +103,22 @@ Crawler HTTPS certificate verification is enabled by default. If you intentional
 }
 ```
 
-Projects created with `npm create @arachnodex` include a local `crawl` script:
+Projects created with `npm create @arachnodex` include a default starter script:
 
 ```sh
-npm run crawl
+npm run crawl:default
+```
+
+They also include a pass-through `crawl` script for custom runs. Put crawler arguments after `--` so npm forwards them:
+
+```sh
+npm run crawl -- -c default -j sitemap
 ```
 
 Generated projects also include a source-mode runner for custom job development:
 
 ```sh
-npm run crawl:src
+npm run crawl:src -- -c default -j sitemap -j link-issues
 ```
 
 In this monorepo, use the root `crawl-dev` script for the same source-mode workflow:
@@ -308,7 +314,7 @@ Core switches may be used before the first job:
 
 | Switch | Description |
 | --- | --- |
-| `-c <config-name>`, `--config=<config-name>` | Load `config/<config-name>.json`. Defaults to `default`. |
+| `-c <config-name>`, `--config=<config-name>` | Load `config/<config-name>.json`. Defaults to `default`; the `.json` suffix is optional. |
 | `-j <job-name\|package>`, `--job=<job-name\|package>` | Run an installed job package. `-j sitemap` loads `@arachnodex/job-sitemap`; `-j @scope/job-name` loads that exact scoped package; `-j npm:package-name` loads an exact unscoped package. |
 | `-h`, `--help` | Display help. Use after a job name for that job's help. |
 | `-m`, `--mute-status` | Mute crawler response status output. Job output and errors still print. |

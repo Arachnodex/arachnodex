@@ -22,7 +22,7 @@ export abstract class BaseCommandParser implements CommandParserInterface {
             type: 'string',
             label: 'config-name',
             description: 'Specify the name of the config which will be used to load config/<name>.json.',
-            note: `Use this before the first job for the crawler config, or after a job name for that job's config.`
+            note: `The .json suffix is optional. Use this before the first job for the crawler config, or after a job name for that job's config.`
         },
         '-j': {
             switch: '-j',
@@ -139,7 +139,11 @@ export abstract class BaseCommandParser implements CommandParserInterface {
     // Return config file name if specified on the commandline via the -c switch,
     // otherwise return the default string provided.
     _getConfigName(defaultName: string):string {
-        return typeof this.arguments['-c'].input === 'string' ? String(this.arguments['-c'].input) : defaultName;
+        const configName = typeof this.arguments['-c'].input === 'string'
+            ? String(this.arguments['-c'].input)
+            : defaultName;
+
+        return configName.endsWith('.json') ? configName.slice(0, -5) : configName;
     }
 
     getHelpMessage(): string {

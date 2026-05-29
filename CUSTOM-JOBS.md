@@ -451,7 +451,7 @@ Then run the core source entrypoint with the development condition enabled:
 npm exec -- node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts -c default -j @acme/arachnodex-job-content-audit
 ```
 
-Projects created with `npm create @arachnodex` include this pattern as `npm run crawl:src`, so you can update that script's `-j` arguments while working on a custom job.
+Projects created with `npm create @arachnodex` include this pattern as the pass-through `npm run crawl:src -- ...` script, so you can provide the `-j` arguments you need while working on a custom job.
 
 Inside this monorepo, use the same mode from the core package:
 
