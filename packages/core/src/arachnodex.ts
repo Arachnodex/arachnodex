@@ -170,13 +170,15 @@ export class Arachnodex {
         //await sleep(2000);
 
         if(this.fatalShutdownStarted) {
-            await this.fatalShutdownPromise;
-            await this.waitForActiveThreadsToSettle();
-            return 1;
+            return await this.finalizeFatalShutdown();
         }
 
         // Send reports and shut down
         await this.shutdown();
+        if(this.fatalShutdownStarted) {
+            return await this.finalizeFatalShutdown();
+        }
+
         return 0;
     }
 
@@ -196,14 +198,23 @@ export class Arachnodex {
             await sleep(pollMsExt);
         }
         this.profiler.mark('shutdown', 'jobs completed');
+        if(this.fatalShutdownStarted) {
+            return;
+        }
 
         this.profiler.mark('shutdown', 'regular report email send starting');
         await new ReportManager(this.profiler, this.runtime.config).sendReport(this.stats, this.jobs.jobs);
         this.profiler.mark('shutdown', 'regular report email send complete');
+        if(this.fatalShutdownStarted) {
+            return;
+        }
 
         this.profiler.mark('shutdown', 'accumulated error report email send starting');
         await new ReportManager(this.profiler, this.runtime.config).sendErrorReport(this.errors, this.stats, this.jobs.jobs);
         this.profiler.mark('shutdown', 'accumulated error report email send complete');
+        if(this.fatalShutdownStarted) {
+            return;
+        }
 
 
         // (-vvv)
@@ -1082,11 +1093,31 @@ export class Arachnodex {
         }
     }
 
-    private async waitForActiveThreadsToSettle(): Promise<void> {
+    private async finalizeFatalShutdown(): Promise<number> {
+        await this.fatalShutdownPromise;
+        const settleResult = await this.waitForActiveThreadsToSettle();
+        if(!settleResult.settled) {
+            this.console.log(
+                `Fatal shutdown continued with ${settleResult.remaining} active worker(s) still unsettled after 5 seconds.`,
+                'yellow.bold',
+                true
+            );
+        }
+
+        return 1;
+    }
+
+    private async waitForActiveThreadsToSettle(): Promise<{settled: boolean; remaining: number}> {
         const deadline = Date.now() + 5000;
         while(this.runtime.activeThreads.size > 0 && Date.now() < deadline) {
             await sleep(pollMsExt);
         }
+
+        const remaining = this.runtime.activeThreads.size;
+        return {
+            settled: remaining === 0,
+            remaining
+        };
     }
 
     private async sendFatalErrorReport(): Promise<void> {

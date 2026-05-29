@@ -428,7 +428,6 @@ export default class LinkIssues extends BaseJob {
             this.profiler.markJob(this.handle, 'shutdown', 'report output complete');
         } finally {
             this.profiler.markJob(this.handle, 'shutdown', 'shutdown complete');
-            this.completed = true;
         }
     }
 
@@ -2018,6 +2017,10 @@ export default class LinkIssues extends BaseJob {
     private async auditExternalLink(externalLink: ExternalLinkRecord, config: AxiosRequestConfig): Promise<void> {
         // HEAD is the primary external check. Fallback GET/HTTPS-upgrade checks reduce false
         // positives from sites that block HEAD or only serve the secure URL.
+        if(this.runtime.aborted) {
+            return;
+        }
+
         const sourceUrl = Array.from(externalLink.sources)[0];
         const rawHref = Array.from(externalLink.rawHrefs)[0];
         const zone = Array.from(externalLink.zones)[0] ?? 'unknown';
@@ -2027,7 +2030,7 @@ export default class LinkIssues extends BaseJob {
                 return;
             }
         } catch (e) {
-            if(this.runtime.aborted && this.isAbortError(e)) {
+            if(this.runtime.aborted) {
                 return;
             }
 
@@ -2037,6 +2040,9 @@ export default class LinkIssues extends BaseJob {
                 }
                 const status = e.response.status;
                 if(status >= 300 && status < 400) {
+                    if(this.runtime.aborted) {
+                        return;
+                    }
                     this.addIssue({
                         severity: 'warning',
                         group: 'External Links',
@@ -2051,6 +2057,9 @@ export default class LinkIssues extends BaseJob {
                     });
                 } else if(status >= 400) {
                     const httpsUrl = await this.getReachableHttpsUpgradeUrl(externalLink.targetUrl, config);
+                    if(this.runtime.aborted) {
+                        return;
+                    }
                     if(httpsUrl !== null) {
                         this.addIssue({
                             severity: 'error',
@@ -2073,6 +2082,9 @@ export default class LinkIssues extends BaseJob {
                     )) {
                         return;
                     }
+                    if(this.runtime.aborted) {
+                        return;
+                    }
 
                     this.addIssue({
                         severity: 'error',
@@ -2090,6 +2102,9 @@ export default class LinkIssues extends BaseJob {
             }
 
             if(this.isTemporaryDnsFailure(e)) {
+                if(this.runtime.aborted) {
+                    return;
+                }
                 this.addIssue({
                     severity: 'warning',
                     group: 'External Links',
@@ -2107,6 +2122,9 @@ export default class LinkIssues extends BaseJob {
             }
 
             const httpsUrl = await this.getReachableHttpsUpgradeUrl(externalLink.targetUrl, config);
+            if(this.runtime.aborted) {
+                return;
+            }
             if(httpsUrl !== null) {
                 this.addIssue({
                     severity: 'error',
@@ -2129,6 +2147,9 @@ export default class LinkIssues extends BaseJob {
             )) {
                 return;
             }
+            if(this.runtime.aborted) {
+                return;
+            }
 
             this.addIssue({
                 severity: 'warning',
@@ -2145,12 +2166,20 @@ export default class LinkIssues extends BaseJob {
     }
 
     private async externalGetShowsReachableOrProtected(url: string, config: AxiosRequestConfig): Promise<boolean> {
+        if(this.runtime.aborted) {
+            return false;
+        }
+
         try {
             const response = await this.externalGet(url, config, false);
             return response.status >= 200 && response.status < 300
                 || response.status >= 300 && response.status < 400
                 || this.isBotProtectionResponse(response);
         } catch (e) {
+            if(this.runtime.aborted || this.isAbortError(e)) {
+                return false;
+            }
+
             return axios.isAxiosError(e)
                 && typeof e.response !== 'undefined'
                 && (
@@ -2172,6 +2201,10 @@ export default class LinkIssues extends BaseJob {
     }
 
     private async getReachableHttpsUpgradeUrl(url: string, config: AxiosRequestConfig): Promise<string|null> {
+        if(this.runtime.aborted) {
+            return null;
+        }
+
         const httpsUrl = this.getHttpsUpgradeUrl(url);
         if(httpsUrl === null) {
             return null;
@@ -2184,12 +2217,20 @@ export default class LinkIssues extends BaseJob {
                 return httpsUrl;
             }
         } catch (e) {
+            if(this.runtime.aborted || this.isAbortError(e)) {
+                return null;
+            }
+
             if(axios.isAxiosError(e) && typeof e.response !== 'undefined') {
                 if(this.isBotProtectionResponse(e.response)
                     || e.response.status >= 200 && e.response.status < 400) {
                     return httpsUrl;
                 }
             }
+        }
+
+        if(this.runtime.aborted) {
+            return null;
         }
 
         return await this.externalGetShowsReachableOrProtected(httpsUrl, fallbackConfig)
@@ -2218,10 +2259,18 @@ export default class LinkIssues extends BaseJob {
     }
 
     private async externalGetShowsBotProtection(url: string, config: AxiosRequestConfig): Promise<boolean> {
+        if(this.runtime.aborted) {
+            return false;
+        }
+
         try {
             const response = await this.externalGet(url, config, false);
             return this.isBotProtectionResponse(response);
         } catch (e) {
+            if(this.runtime.aborted || this.isAbortError(e)) {
+                return false;
+            }
+
             return axios.isAxiosError(e)
                 && typeof e.response !== 'undefined'
                 && this.isBotProtectionResponse(e.response);
@@ -2265,10 +2314,17 @@ export default class LinkIssues extends BaseJob {
         let lastError: unknown;
         const maxAttempts = retry ? externalCheckMaxAttempts : 1;
         for(let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if(this.runtime.aborted) {
+                throw new Error('External link audit aborted.');
+            }
+
             try {
                 return await request();
             } catch (e) {
                 lastError = e;
+                if(this.runtime.aborted || this.isAbortError(e)) {
+                    throw e;
+                }
                 if(!this.shouldRetryExternalRequest(e) || attempt === maxAttempts) {
                     throw e;
                 }
@@ -2281,6 +2337,7 @@ export default class LinkIssues extends BaseJob {
     private shouldRetryExternalRequest(error: unknown): boolean {
         return axios.isAxiosError(error)
             && typeof error.response === 'undefined'
+            && !this.runtime.aborted
             && !this.isAbortError(error);
     }
 

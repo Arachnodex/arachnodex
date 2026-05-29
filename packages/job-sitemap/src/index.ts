@@ -213,16 +213,16 @@ export default class Sitemap extends BaseJob {
         await this.pageWriter?.terminate();
         await this.docWriter?.terminate();
         if(this.pageWriter?.hasFailed() === true || this.docWriter?.hasFailed() === true) {
+            this.cleanupTempFiles();
             return;
-        }
-
-        // Remove existing sitemap file if it exists
-        if (fse.pathExistsSync(this.outputFile)) {
-            this.removeFile(this.outputFile);
         }
 
         // Merge temp files and wrap with the XML sitemap envelope.
         try {
+            // Remove existing sitemap file if it exists
+            if (fse.pathExistsSync(this.outputFile)) {
+                this.removeFile(this.outputFile);
+            }
 
             const writer = await open(this.outputFile, 'w');
 
@@ -245,24 +245,16 @@ export default class Sitemap extends BaseJob {
                 await writer.close();
             }
 
-            // remove temp files
-            if (fse.pathExistsSync(this.pageWriterFile)) {
-                this.removeFile(this.pageWriterFile);
-            }
-            if (fse.pathExistsSync(this.docWriterFile)) {
-                this.removeFile(this.docWriterFile);
-            }
-
         } catch(e) {
             this.emitFatal(
                 e instanceof Error ? e : new Error(),
                 `[sitemap] Error occurred during final merge and write operation.`
             );
             return;
+        } finally {
+            this.cleanupTempFiles();
         }
 
-        // Signal job is complete
-        this.completed = true;
     }
 
     async pipeData(writer: FileHandle, readFile: string) {
@@ -289,6 +281,14 @@ export default class Sitemap extends BaseJob {
         } catch(e) {
             this.emitFatal(e instanceof Error ? e : null, `[sitemap] Unable to unlink file '${filePath}'!`);
         }
+    }
+
+    private cleanupTempFiles(): void {
+        [this.pageWriterFile, this.docWriterFile].forEach(filePath => {
+            if(filePath !== '' && fse.pathExistsSync(filePath)) {
+                this.removeFile(filePath);
+            }
+        });
     }
 
     // Error helper

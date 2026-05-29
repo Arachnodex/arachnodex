@@ -32,5 +32,6 @@ export default class Sitemap extends BaseJob {
     onEnd(): Promise<void>;
     pipeData(writer: FileHandle, readFile: string): Promise<void>;
     removeFile(filePath: string): void;
+    private cleanupTempFiles;
     emitFatal(e?: Error | null, message?: string, location?: Location): void;
 }

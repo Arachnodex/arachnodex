@@ -58,6 +58,7 @@ export declare class Arachnodex {
     private isExternalUrl;
     private classifyLinkZone;
     errorEventHandler(e: Error, message?: string, location?: Location, suppressEmail?: boolean, fatal?: boolean): void;
+    private finalizeFatalShutdown;
     private waitForActiveThreadsToSettle;
     private sendFatalErrorReport;
 }
