@@ -32,6 +32,7 @@ type LinkIssue = {
     targetUrl?: string;
     sourceUrl?: string;
     rawHref?: string;
+    htmlSnippet?: string;
     normalizedUrl?: string;
     pageUrl?: string;
     linkedUrl?: string;
@@ -51,6 +52,7 @@ interface LinkIssuesConfig extends JSONObject {
     allowedNonCanonicalLinks: string[];
     emailReportEnabled: boolean;
     emailReportTriggerLevels: LinkIssueSeverity[]|null;
+    ignoredCanonicalQueryVariantPatterns: string[];
     undesirablePathCharacterPattern: string;
 }
 
@@ -88,6 +90,7 @@ type FragmentRequest = {
     fragment: string;
     sourceUrl: string;
     rawHref: string;
+    htmlSnippet?: string;
     zone: LinkZone;
 }
 
@@ -100,6 +103,7 @@ type ExternalLinkRecord = {
     targetUrl: string;
     sources: Set<string>;
     rawHrefs: Set<string>;
+    htmlSnippets: Set<string>;
     zones: Set<LinkZone>;
 }
 
@@ -204,6 +208,7 @@ export default class LinkIssues extends BaseJob {
     baseProtocol: string;
     baseHostname: string;
     allowedNonCanonicalLinks: string[] = [];
+    ignoredCanonicalQueryVariantPatterns: RegExp[] = [];
     undesirablePathCharacterPattern = /[^\w\-/.]/;
     emailReportTriggerLevels: LinkIssueSeverity[]|null = ['error', 'warning', 'notice'];
     includeNotices: boolean;
@@ -232,6 +237,7 @@ export default class LinkIssues extends BaseJob {
         const config = this.config.getJobConfig<LinkIssuesConfig>({
             allowedNonCanonicalLinks: [],
             emailReportTriggerLevels: ['error', 'warning', 'notice'],
+            ignoredCanonicalQueryVariantPatterns: [],
             undesirablePathCharacterPattern: '[^\\w\\-/.]',
             emailReportEnabled: true
         }, this.command, false);
@@ -248,6 +254,7 @@ export default class LinkIssues extends BaseJob {
                 }
             });
         }
+        this.ignoredCanonicalQueryVariantPatterns = this.compilePatternList(config.ignoredCanonicalQueryVariantPatterns);
     }
 
     shouldSendEmailReport(): boolean {
@@ -328,6 +335,7 @@ export default class LinkIssues extends BaseJob {
                 message: 'URL failed to fetch after retries.',
                 targetUrl: _location.url,
                 sourceUrl: _location.referer,
+                htmlSnippet: _location.htmlSnippet,
                 statusCode: status
             });
             return;
@@ -342,6 +350,7 @@ export default class LinkIssues extends BaseJob {
                     message: `${status} redirect response.`,
                     targetUrl: _location.url,
                     sourceUrl: _location.referer,
+                    htmlSnippet: _location.htmlSnippet,
                     statusCode: status,
                     finalUrl: _location.redirectedTo,
                     redirectChain: _location.redirectChain
@@ -358,6 +367,7 @@ export default class LinkIssues extends BaseJob {
                 message: `${status} client error response.`,
                 targetUrl: _location.url,
                 sourceUrl: _location.referer,
+                htmlSnippet: _location.htmlSnippet,
                 statusCode: status
             });
             return;
@@ -371,6 +381,7 @@ export default class LinkIssues extends BaseJob {
                 message: `${status} server error response.`,
                 targetUrl: _location.url,
                 sourceUrl: _location.referer,
+                htmlSnippet: _location.htmlSnippet,
                 statusCode: status
             });
         }
@@ -505,6 +516,7 @@ export default class LinkIssues extends BaseJob {
                 issue.group,
                 issue.code,
                 issue.rawHref ?? '',
+                issue.htmlSnippet ?? '',
                 issue.statusCode ?? ''
             ].join('|');
         }
@@ -703,6 +715,9 @@ export default class LinkIssues extends BaseJob {
         }
         if(typeof issue.rawHref === 'string') {
             details.push(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`);
+        }
+        if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
+            details.push(`Anchor HTML: ${issue.htmlSnippet}`);
         }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             details.push(`Normalized: ${issue.normalizedUrl}`);
@@ -1209,6 +1224,12 @@ export default class LinkIssues extends BaseJob {
                     'Update the href in navigation, templates, CMS content, or data from the Linked URL found in source to the Expected/preferred canonical URL.',
                     'For wrapper links, fix the shared layout/navigation source rather than editing individual pages.'
                 ];
+            case 'canonical-query-variant':
+                return [
+                    'These internal links include a query string while the target page canonical points to the same URL without that query string.',
+                    'Confirm the query string represents intentional UI state, campaign data, or an action trigger rather than distinct indexable content.',
+                    'If the query variant is expected, add a matching ignoredCanonicalQueryVariantPatterns entry so future notice output stays focused.'
+                ];
             case 'malformed-href':
                 return [
                     'These href values could not be parsed safely.',
@@ -1362,6 +1383,9 @@ export default class LinkIssues extends BaseJob {
         }
         if(typeof issue.rawHref === 'string') {
             details.push(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`);
+        }
+        if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
+            details.push(`Anchor HTML: ${issue.htmlSnippet}`);
         }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             details.push(`Normalized: ${issue.normalizedUrl}`);
@@ -1558,6 +1582,9 @@ export default class LinkIssues extends BaseJob {
         if(typeof issue.linkedUrl === 'string') {
             details.push(`Linked URL found in source: ${issue.linkedUrl}`);
         }
+        if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
+            details.push(`Anchor HTML: ${issue.htmlSnippet}`);
+        }
         if(typeof issue.canonicalUrl === 'string') {
             details.push(`Current canonical value: ${issue.canonicalUrl === '' ? '[empty]' : issue.canonicalUrl}`);
         }
@@ -1628,6 +1655,9 @@ export default class LinkIssues extends BaseJob {
         if(typeof issue.rawHref === 'string') {
             this.reportLine(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`, theme, 4);
         }
+        if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
+            this.reportLine(`Anchor HTML: ${issue.htmlSnippet}`, theme, 4);
+        }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             this.reportLine(`Normalized: ${issue.normalizedUrl}`, theme, 4);
         }
@@ -1678,6 +1708,7 @@ export default class LinkIssues extends BaseJob {
             message: warning.message,
             sourceUrl: warning.referer,
             rawHref: warning.rawValue,
+            htmlSnippet: warning.htmlSnippet,
             pageUrl: warning.type === 'malformed-canonical' ? warning.referer : undefined,
             canonicalUrl: warning.type === 'malformed-canonical' ? warning.rawValue : undefined,
             expectedCanonicalUrl: warning.type === 'malformed-canonical' ? warning.referer : undefined,
@@ -1743,6 +1774,7 @@ export default class LinkIssues extends BaseJob {
                     targetUrl: link.normalizedUrl,
                     sourceUrl: link.referer,
                     rawHref: link.rawHref,
+                    htmlSnippet: link.htmlSnippet,
                     normalizedUrl: link.normalizedUrl,
                     decodedPath,
                     zone: link.zone ?? 'unknown'
@@ -1760,6 +1792,25 @@ export default class LinkIssues extends BaseJob {
         } catch {
             return /[^\w\-/.]/;
         }
+    }
+
+    private compilePatternList(patterns: string[]): RegExp[] {
+        if(!Array.isArray(patterns)) {
+            return [];
+        }
+
+        const compiled: RegExp[] = [];
+        patterns.forEach(pattern => {
+            if(typeof pattern !== 'string' || pattern === '') {
+                return;
+            }
+            try {
+                compiled.push(new RegExp(pattern));
+            } catch {
+                // Invalid ignore patterns are skipped so one typo does not disable the job.
+            }
+        });
+        return compiled;
     }
 
     private normalizeEmailReportTriggerLevels(levels: LinkIssueSeverity[]|null): LinkIssueSeverity[]|null {
@@ -1818,6 +1869,7 @@ export default class LinkIssues extends BaseJob {
             targetUrl: link.normalizedUrl,
             sourceUrl: link.referer,
             rawHref: link.rawHref,
+            htmlSnippet: link.htmlSnippet,
             normalizedUrl: link.normalizedUrl,
             zone: link.zone ?? 'unknown'
         });
@@ -1882,6 +1934,7 @@ export default class LinkIssues extends BaseJob {
                     targetUrl,
                     sourceUrl: link.referer,
                     rawHref: link.rawHref,
+                    htmlSnippet: link.htmlSnippet,
                     normalizedUrl: link.normalizedUrl,
                     zone
                 });
@@ -1895,6 +1948,7 @@ export default class LinkIssues extends BaseJob {
                 fragment,
                 sourceUrl: link.referer,
                 rawHref: link.rawHref,
+                htmlSnippet: link.htmlSnippet,
                 zone
             });
         }
@@ -1915,6 +1969,7 @@ export default class LinkIssues extends BaseJob {
                     targetUrl: `${request.targetUrl}#${request.fragment}`,
                     sourceUrl: request.sourceUrl,
                     rawHref: request.rawHref,
+                    htmlSnippet: request.htmlSnippet,
                     zone: request.zone
                 });
             }
@@ -1934,6 +1989,7 @@ export default class LinkIssues extends BaseJob {
                 targetUrl: link.normalizedUrl,
                 sources: new Set<string>(),
                 rawHrefs: new Set<string>(),
+                htmlSnippets: new Set<string>(),
                 zones: new Set<LinkZone>()
             };
             this.externalLinks.set(link.normalizedUrl, record);
@@ -1941,6 +1997,9 @@ export default class LinkIssues extends BaseJob {
 
         record.sources.add(link.referer);
         record.rawHrefs.add(link.rawHref);
+        if(typeof link.htmlSnippet === 'string' && link.htmlSnippet !== '') {
+            record.htmlSnippets.add(link.htmlSnippet);
+        }
         record.zones.add(link.zone ?? 'unknown');
     }
 
@@ -2023,6 +2082,7 @@ export default class LinkIssues extends BaseJob {
 
         const sourceUrl = Array.from(externalLink.sources)[0];
         const rawHref = Array.from(externalLink.rawHrefs)[0];
+        const htmlSnippet = Array.from(externalLink.htmlSnippets)[0];
         const zone = Array.from(externalLink.zones)[0] ?? 'unknown';
         try {
             const response = await this.externalHead(externalLink.targetUrl, config);
@@ -2051,6 +2111,7 @@ export default class LinkIssues extends BaseJob {
                         targetUrl: externalLink.targetUrl,
                         sourceUrl,
                         rawHref,
+                        htmlSnippet,
                         statusCode: status,
                         finalUrl: String(e.response.headers.location ?? ''),
                         zone
@@ -2069,6 +2130,7 @@ export default class LinkIssues extends BaseJob {
                             targetUrl: externalLink.targetUrl,
                             sourceUrl,
                             rawHref,
+                            htmlSnippet,
                             statusCode: status,
                             finalUrl: httpsUrl,
                             zone
@@ -2094,6 +2156,7 @@ export default class LinkIssues extends BaseJob {
                         targetUrl: externalLink.targetUrl,
                         sourceUrl,
                         rawHref,
+                        htmlSnippet,
                         statusCode: status,
                         zone
                     });
@@ -2113,6 +2176,7 @@ export default class LinkIssues extends BaseJob {
                     targetUrl: externalLink.targetUrl,
                     sourceUrl,
                     rawHref,
+                    htmlSnippet,
                     statusCode: 0,
                     networkErrorCode: 'EAI_AGAIN',
                     networkErrorMessage: e instanceof Error ? e.message : String(e),
@@ -2134,6 +2198,7 @@ export default class LinkIssues extends BaseJob {
                     targetUrl: externalLink.targetUrl,
                     sourceUrl,
                     rawHref,
+                    htmlSnippet,
                     statusCode: 0,
                     finalUrl: httpsUrl,
                     zone
@@ -2159,6 +2224,7 @@ export default class LinkIssues extends BaseJob {
                 targetUrl: externalLink.targetUrl,
                 sourceUrl,
                 rawHref,
+                htmlSnippet,
                 statusCode: 0,
                 zone
             });
@@ -2486,6 +2552,25 @@ export default class LinkIssues extends BaseJob {
         const basePath = this.baseUrl.replace(/\/+$/, '');
         const pattern = new RegExp(`^${escapeRegExp(basePath)}`);
         if(pageData.location.url !== normalizedCanonical
+            && this.isCanonicalQueryVariant(pageData.location.url, normalizedCanonical)) {
+            if(!this.shouldIgnoreCanonicalQueryVariant(pageData.location.url)) {
+                this.addIssue({
+                    severity: 'notice',
+                    group: 'Canonical Issues',
+                    code: 'canonical-query-variant',
+                    message: 'Internal link target differs from its canonical URL only by query string.',
+                    targetUrl: pageData.location.url,
+                    sourceUrl: pageData.location.referer,
+                    htmlSnippet: pageData.location.htmlSnippet,
+                    finalUrl: normalizedCanonical,
+                    pageUrl: pageData.location.url,
+                    linkedUrl: pageData.location.url,
+                    canonicalUrl: normalizedCanonical,
+                    expectedCanonicalUrl: normalizedCanonical,
+                    zone: 'unknown'
+                });
+            }
+        } else if(pageData.location.url !== normalizedCanonical
             && this.allowedNonCanonicalLinks.indexOf(normalizedCanonical.replace(pattern, '')) === -1) {
             this.nonCanonicalTargets.add(pageData.location.url);
             this.addIssue({
@@ -2495,6 +2580,7 @@ export default class LinkIssues extends BaseJob {
                 message: 'Internal link target differs from its canonical URL.',
                 targetUrl: pageData.location.url,
                 sourceUrl: pageData.location.referer,
+                htmlSnippet: pageData.location.htmlSnippet,
                 finalUrl: normalizedCanonical,
                 pageUrl: pageData.location.url,
                 linkedUrl: pageData.location.url,
@@ -2505,6 +2591,41 @@ export default class LinkIssues extends BaseJob {
         }
 
         return normalizedCanonical;
+    }
+
+    private isCanonicalQueryVariant(pageUrl: string, canonicalUrl: string): boolean {
+        try {
+            const page = new URL(pageUrl);
+            const canonical = new URL(canonicalUrl);
+            page.search = '';
+            canonical.search = '';
+            return this.normalizeInternalUrl(page.href) === this.normalizeInternalUrl(canonical.href);
+        } catch {
+            return false;
+        }
+    }
+
+    private shouldIgnoreCanonicalQueryVariant(url: string): boolean {
+        if(this.ignoredCanonicalQueryVariantPatterns.length === 0) {
+            return false;
+        }
+
+        let normalizedUrl = url;
+        let pathWithQuery = '';
+        try {
+            const parsed = new URL(url, this.baseUrl);
+            normalizedUrl = this.normalizeInternalUrl(parsed.href);
+            pathWithQuery = `${parsed.pathname}${parsed.search}`;
+        } catch {
+            // Keep the original URL as the only match candidate.
+        }
+
+        return this.ignoredCanonicalQueryVariantPatterns.some(pattern => {
+            pattern.lastIndex = 0;
+            const normalizedMatch = pattern.test(normalizedUrl);
+            pattern.lastIndex = 0;
+            return normalizedMatch || (pathWithQuery !== '' && pattern.test(pathWithQuery));
+        });
     }
 
     private shouldSkipOutgoingLinkAudit(pageData: PageData, canonicalUrl: string|null): boolean {
@@ -2575,6 +2696,8 @@ export default class LinkIssues extends BaseJob {
                     code: 'redirect-loop',
                     message: 'Redirect chain appears to loop.',
                     targetUrl: location.url,
+                    sourceUrl: location.referer,
+                    htmlSnippet: location.htmlSnippet,
                     finalUrl,
                     statusCode: location.statusCode,
                     redirectChain: cleanChain,
@@ -2590,6 +2713,8 @@ export default class LinkIssues extends BaseJob {
                     code: 'redirect-final-target-failed',
                     message: 'Redirect final target failed to fetch.',
                     targetUrl: location.url,
+                    sourceUrl: location.referer,
+                    htmlSnippet: location.htmlSnippet,
                     finalUrl,
                     statusCode: finalStatus,
                     redirectChain: cleanChain,
@@ -2605,6 +2730,8 @@ export default class LinkIssues extends BaseJob {
                     code: 'redirect-chain',
                     message: 'Redirect requires multiple hops.',
                     targetUrl: location.url,
+                    sourceUrl: location.referer,
+                    htmlSnippet: location.htmlSnippet,
                     finalUrl,
                     statusCode: location.statusCode,
                     redirectChain: cleanChain,
@@ -2619,6 +2746,8 @@ export default class LinkIssues extends BaseJob {
                     code: 'redirect-final-target-non-canonical',
                     message: 'Temporary redirect final target is non-canonical.',
                     targetUrl: location.url,
+                    sourceUrl: location.referer,
+                    htmlSnippet: location.htmlSnippet,
                     finalUrl,
                     statusCode: location.statusCode,
                     redirectChain: cleanChain,

@@ -79,6 +79,7 @@ export type Location = {
     url: string;
     rawUrl: string;
     referer?: string;
+    htmlSnippet?: string;
     referredAsCanonical?: boolean;
     canonicalUrl?: string;
     redirectedFrom?: string;
@@ -99,10 +100,12 @@ export type PageParseWarning = {
     message: string;
     rawValue: string;
     referer: string;
+    htmlSnippet?: string;
 };
 export type PageLink = {
     rawHref: string;
     hasHref: boolean;
+    htmlSnippet?: string;
     normalizedUrl?: string;
     referer: string;
     text?: string;

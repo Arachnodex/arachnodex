@@ -876,6 +876,7 @@ export class Arachnodex {
                                 && this.runtime.urlHelper.validateLocation(previewLocation.url, 'urlCantContain')
                                 && this.runtime.urlHelper.validateLocation(previewLocation.url, 'urlMustContain')
                             ) {
+                                newLocation.htmlSnippet = pageLink.htmlSnippet;
                                 pageLink.normalizedUrl = previewLocation.url;
                                 pageLink.isExternal = false;
                                 pageLink.isCrawlable = true;
@@ -963,6 +964,7 @@ export class Arachnodex {
         const pageLink: PageLink = {
             rawHref,
             hasHref: href !== null,
+            htmlSnippet: this.getAnchorHtmlSnippet(element),
             referer: location.url,
             text: String(element.textContent ?? '').trim(),
             target: element.getAttribute('target') ?? undefined,
@@ -981,6 +983,7 @@ export class Arachnodex {
             decodedHref = decodeURIComponent(href).trim();
         } catch (e) {
             const warning = this.createParseWarning('malformed-href', href, location, e);
+            warning.htmlSnippet = pageLink.htmlSnippet;
             pageLink.parseWarnings = [warning];
             return pageLink;
         }
@@ -994,10 +997,69 @@ export class Arachnodex {
             pageLink.isExternal = this.isExternalUrl(normalizedUrl);
         } catch (e) {
             const warning = this.createParseWarning('malformed-href', href, location, e);
+            warning.htmlSnippet = pageLink.htmlSnippet;
             pageLink.parseWarnings = [warning];
         }
 
         return pageLink;
+    }
+
+    private getAnchorHtmlSnippet(element: HTMLAnchorElement): string {
+        const innerHtml = element.innerHTML;
+        if(Buffer.byteLength(innerHtml, 'utf8') <= 128) {
+            return element.outerHTML.trim();
+        }
+
+        const emptyAnchor = element.cloneNode(false) as HTMLAnchorElement;
+        const openingTag = emptyAnchor.outerHTML.trim().replace(/><\/a>$/i, '>');
+        const renderedContent = this.getTrimmedAnchorRenderedContent(element);
+        const summary = renderedContent === ''
+            ? 'inner HTML trimmed; no rendered text or images detected'
+            : `inner HTML trimmed; rendered content: ${renderedContent}`;
+
+        return `${openingTag}[${summary}]</a>`;
+    }
+
+    private getTrimmedAnchorRenderedContent(element: HTMLAnchorElement): string {
+        const content: string[] = [];
+        const text = String(element.textContent ?? '').replace(/\s+/g, ' ').trim();
+        if(text !== '') {
+            const trimmedText = this.trimUtf8Bytes(text, 128);
+            content.push(`text "${trimmedText.value}${trimmedText.trimmed ? '...' : ''}"`);
+        }
+
+        const imageLabels = Array.from(element.querySelectorAll('img')).map(image => {
+            const label = image.getAttribute('alt')
+                ?? image.getAttribute('title')
+                ?? image.getAttribute('aria-label')
+                ?? image.getAttribute('src')
+                ?? '';
+            const trimmedLabel = this.trimUtf8Bytes(label.replace(/\s+/g, ' ').trim(), 96);
+            return trimmedLabel.value === ''
+                ? 'image'
+                : `image "${trimmedLabel.value}${trimmedLabel.trimmed ? '...' : ''}"`;
+        });
+        if(imageLabels.length > 0) {
+            const visibleImages = imageLabels.slice(0, 5).join(', ');
+            const suffix = imageLabels.length > 5 ? `, ... ${imageLabels.length - 5} more` : '';
+            content.push(`images ${visibleImages}${suffix}`);
+        }
+
+        return content.join('; ');
+    }
+
+    private trimUtf8Bytes(value: string, maxBytes: number): { value: string; trimmed: boolean } {
+        let bytes = 0;
+        let output = '';
+        for(const character of value) {
+            const characterBytes = Buffer.byteLength(character, 'utf8');
+            if(bytes + characterBytes > maxBytes) {
+                return {value: output, trimmed: true};
+            }
+            bytes += characterBytes;
+            output += character;
+        }
+        return {value: output, trimmed: false};
     }
 
     private isLocationInScope(location: Location): boolean {

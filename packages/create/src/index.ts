@@ -10,8 +10,8 @@ type ScaffoldConfig = {
 }
 
 const packageDependencies = {
-    "@arachnodex/core": "^1.0.2",
-    "@arachnodex/job-link-issues": "^1.0.1",
+    "@arachnodex/core": "^1.0.4",
+    "@arachnodex/job-link-issues": "^1.0.2",
     "@arachnodex/job-sitemap": "^1.0.1"
 };
 

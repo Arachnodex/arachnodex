@@ -53,6 +53,9 @@ export declare class Arachnodex {
     private getPreparedLocationUrl;
     private createParseWarning;
     private createPageLink;
+    private getAnchorHtmlSnippet;
+    private getTrimmedAnchorRenderedContent;
+    private trimUtf8Bytes;
     private isLocationInScope;
     private isFilteredInternalUrl;
     private isExternalUrl;

@@ -34,6 +34,13 @@ Run it with copy/paste prompt output:
 npm exec -- arachnodex -c default -j link-issues -p
 ```
 
+When available, console reports, email reports, and prompt output include an
+`Anchor HTML` detail with the offending `<a>` element. Anchors with small inner
+HTML are shown exactly; anchors with inner HTML over 128 bytes keep the real
+opening/closing anchor tag but replace the body with a bracketed rendered
+text/image summary marked as trimmed. This gives patching agents a concrete
+snippet to search for without flooding reports with large nested markup.
+
 Use a job-specific config by placing `-c` after the job name:
 
 ```sh
@@ -65,7 +72,8 @@ Default config:
   "emailReportEnabled": true,
   "emailReportTriggerLevels": ["error", "warning", "notice"],
   "undesirablePathCharacterPattern": "[^\\w\\-/.]",
-  "allowedNonCanonicalLinks": []
+  "allowedNonCanonicalLinks": [],
+  "ignoredCanonicalQueryVariantPatterns": []
 }
 ```
 
@@ -77,6 +85,14 @@ Default config:
 | `emailReportTriggerLevels` | array or `null` | `["error", "warning", "notice"]` | Severity levels that are allowed to trigger the email report. Valid values are `error`, `warning`, and `notice`. Set to `null` or an empty array to allow the report whenever the job has findings. |
 | `undesirablePathCharacterPattern` | string | `"[^\\w\\-/.]"` | Regular expression used against decoded internal URL paths. Matching paths create notice-level URL path quality findings. |
 | `allowedNonCanonicalLinks` | string[] | `[]` | Path allowlist for internal pages that may point to a different canonical URL without being reported. Entries are compared after the configured `baseUrl` is removed from the normalized canonical target. |
+| `ignoredCanonicalQueryVariantPatterns` | string[] | `[]` | Regular expression patterns for query-string URL variants that should not create notice-level canonical query variant findings. Patterns are tested against the normalized full URL and the path/query form, such as `^https://www.example.com/\\?catalog-request$` or `^/\\?catalog-request$`. |
+
+Internal links whose only canonical mismatch is the query string are reported as
+notices, not warnings. This catches links such as `/?catalog-request` when the
+page canonical is `/`, while still treating path, host, and protocol canonical
+mismatches as warnings. Use `ignoredCanonicalQueryVariantPatterns` for known
+query-driven UI states, campaign parameters, modal triggers, or action flags
+that should stay out of notice output.
 
 ## Finding Severity
 
@@ -96,6 +112,11 @@ External link checks are disabled by default. Enable them with `-e`:
 npm exec -- arachnodex -c default -j link-issues -e
 ```
 
+The `-e` switch only controls network verification of external URLs. External
+anchors can still appear in the report without `-e` when they trigger regular
+anchor hygiene findings, such as malformed hrefs, unsafe protocols, or
+`target="_blank"` links missing `rel="noopener"`/`rel="noreferrer"`.
+
 When external checks are enabled, the job uses the `@arachnodex/bot-protection-heuristics` package through `@arachnodex/core` to recognize common WAF, CAPTCHA, and browser-challenge responses. Those responses are treated as inconclusive instead of broken because many third-party sites block automated HEAD or GET checks while still serving normal browsers.
 
 Crawler TLS behavior for external HTTPS checks follows the core `requestTls.rejectUnauthorized` setting.
@@ -106,5 +127,5 @@ Crawler TLS behavior for external HTTPS checks follows the core `requestTls.reje
 | --- | --- |
 | `-V`, `--version` | Print the Link Issues job version and exit without crawling. |
 | `-n`, `--include-notices` | Include notice-level findings. By default, only errors and warnings render. |
-| `-e`, `--include-external` | Check external links using HEAD requests with limited fallback behavior. |
+| `-e`, `--include-external` | Check external links using HEAD requests with limited fallback behavior. This does not disable normal anchor hygiene reporting for external hrefs when omitted. |
 | `-p`, `--prompt` | Output grouped findings as copy/paste prompts for another coding agent. |

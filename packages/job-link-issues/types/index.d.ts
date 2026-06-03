@@ -10,6 +10,7 @@ type LinkIssue = {
     targetUrl?: string;
     sourceUrl?: string;
     rawHref?: string;
+    htmlSnippet?: string;
     normalizedUrl?: string;
     pageUrl?: string;
     linkedUrl?: string;
@@ -46,6 +47,7 @@ type FragmentRequest = {
     fragment: string;
     sourceUrl: string;
     rawHref: string;
+    htmlSnippet?: string;
     zone: LinkZone;
 };
 type CanonicalReference = {
@@ -56,6 +58,7 @@ type ExternalLinkRecord = {
     targetUrl: string;
     sources: Set<string>;
     rawHrefs: Set<string>;
+    htmlSnippets: Set<string>;
     zones: Set<LinkZone>;
 };
 export default class LinkIssues extends BaseJob {
@@ -77,6 +80,7 @@ export default class LinkIssues extends BaseJob {
     baseProtocol: string;
     baseHostname: string;
     allowedNonCanonicalLinks: string[];
+    ignoredCanonicalQueryVariantPatterns: RegExp[];
     undesirablePathCharacterPattern: RegExp;
     emailReportTriggerLevels: LinkIssueSeverity[] | null;
     includeNotices: boolean;
@@ -147,6 +151,7 @@ export default class LinkIssues extends BaseJob {
     private issueFromParseWarning;
     private auditPageLinks;
     private compileUndesirablePathCharacterPattern;
+    private compilePatternList;
     private normalizeEmailReportTriggerLevels;
     private getDecodedUrlPath;
     private addPageLinkIssue;
@@ -174,6 +179,8 @@ export default class LinkIssues extends BaseJob {
     private isBotProtectionResponse;
     private getHeaderText;
     private auditCanonical;
+    private isCanonicalQueryVariant;
+    private shouldIgnoreCanonicalQueryVariant;
     private shouldSkipOutgoingLinkAudit;
     private auditCanonicalTargets;
     private auditRedirects;
