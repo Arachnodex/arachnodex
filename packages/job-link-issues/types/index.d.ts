@@ -25,6 +25,12 @@ type LinkIssue = {
     redirectChain?: string[];
     zone?: LinkZone;
 };
+type IgnoredIssuePattern = {
+    pattern: RegExp;
+    codes: Set<string> | null;
+    groups: Set<string> | null;
+    severities: Set<LinkIssueSeverity> | null;
+};
 type LinkOccurrence = {
     referer: string;
     zone: LinkZone;
@@ -80,7 +86,7 @@ export default class LinkIssues extends BaseJob {
     baseProtocol: string;
     baseHostname: string;
     allowedNonCanonicalLinks: string[];
-    ignoredCanonicalQueryVariantPatterns: RegExp[];
+    ignoredIssuePatterns: IgnoredIssuePattern[];
     undesirablePathCharacterPattern: RegExp;
     emailReportTriggerLevels: LinkIssueSeverity[] | null;
     includeNotices: boolean;
@@ -99,6 +105,8 @@ export default class LinkIssues extends BaseJob {
     private addIssue;
     private getIssueKey;
     private shouldSuppressIssue;
+    private matchesIgnoredIssuePattern;
+    private getIgnoredIssueUrlCandidates;
     private isFilteredInternalUrl;
     private getReportKey;
     private reportIssues;
@@ -151,7 +159,9 @@ export default class LinkIssues extends BaseJob {
     private issueFromParseWarning;
     private auditPageLinks;
     private compileUndesirablePathCharacterPattern;
-    private compilePatternList;
+    private compileIgnoredIssuePatterns;
+    private compileStringSelector;
+    private compileSeveritySelector;
     private normalizeEmailReportTriggerLevels;
     private getDecodedUrlPath;
     private addPageLinkIssue;
@@ -180,7 +190,6 @@ export default class LinkIssues extends BaseJob {
     private getHeaderText;
     private auditCanonical;
     private isCanonicalQueryVariant;
-    private shouldIgnoreCanonicalQueryVariant;
     private shouldSkipOutgoingLinkAudit;
     private auditCanonicalTargets;
     private auditRedirects;

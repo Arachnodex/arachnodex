@@ -27,19 +27,19 @@ export class MainCommandParser extends BaseCommandParser {
         const switches :{[k: string]: ArgumentConfig} = {
             '-m': {
                 switch: '-m',
-                aliases: ['--mute-status'],
+                aliases: ['--mute', '--mute-status'],
                 value: false,
                 configPath: 'muteResponseStatus',
                 description: 'Mute crawler response status console output.',
                 note: 'Job output and errors are still displayed.'
             },
-            '-mm': {
-                switch: '-mm',
-                aliases: ['--mute-all'],
+            '-q': {
+                switch: '-q',
+                aliases: ['--quiet', '-mm', '--mute-all'],
                 value: false,
                 configPath: 'muteAll',
                 description: 'Mute ALL non error console output.',
-                note: 'This includes non-error output from jobs.'
+                note: 'This includes non-error output from jobs. Legacy aliases: -mm, --mute-all.'
             },
             '-nc': {
                 switch: '-nc',

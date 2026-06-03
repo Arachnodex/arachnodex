@@ -318,8 +318,8 @@ Core switches may be used before the first job:
 | `-c <config-name>`, `--config=<config-name>` | Load `config/<config-name>.json`. Defaults to `default`; the `.json` suffix is optional. |
 | `-j <job-name\|package>`, `--job=<job-name\|package>` | Run an installed job package. `-j sitemap` loads `@arachnodex/job-sitemap`; `-j @scope/job-name` loads that exact scoped package; `-j npm:package-name` loads an exact unscoped package. |
 | `-h`, `--help` | Display help. Use after a job name for that job's help. |
-| `-m`, `--mute-status` | Mute crawler response status output. Job output and errors still print. |
-| `-mm`, `--mute-all` | Mute all non-error output, including job output. |
+| `-m`, `--mute` | Mute crawler response status output by overriding `muteResponseStatus` for this run. Job output and errors still print. Alias: `--mute-status`. |
+| `-q`, `--quiet` | Mute all non-error output by overriding `muteAll` for this run, including job output. Legacy aliases: `-mm`, `--mute-all`. |
 | `-nc`, `--no-color` | Disable ANSI color output. |
 | `-nm`, `--no-mail` | Disable regular and error email reports for the run. |
 | `-t <count>`, `--threads=<count>` | Set the maximum worker thread count. |

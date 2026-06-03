@@ -48,12 +48,26 @@ type LinkIssue = {
     zone?: LinkZone;
 }
 
+interface IgnoredIssuePatternConfig extends JSONObject {
+    urlPattern: string;
+    codes?: string[];
+    groups?: string[];
+    severities?: LinkIssueSeverity[];
+}
+
 interface LinkIssuesConfig extends JSONObject {
     allowedNonCanonicalLinks: string[];
     emailReportEnabled: boolean;
     emailReportTriggerLevels: LinkIssueSeverity[]|null;
-    ignoredCanonicalQueryVariantPatterns: string[];
+    ignoredIssuePatterns: IgnoredIssuePatternConfig[];
     undesirablePathCharacterPattern: string;
+}
+
+type IgnoredIssuePattern = {
+    pattern: RegExp;
+    codes: Set<string>|null;
+    groups: Set<string>|null;
+    severities: Set<LinkIssueSeverity>|null;
 }
 
 type LinkOccurrence = {
@@ -164,6 +178,8 @@ const externalCheckTimeoutMs = 5000;
 const externalCheckMaxAttempts = 3;
 const externalCheckUrlTimeoutMs = externalCheckTimeoutMs * externalCheckMaxAttempts;
 const reportIndent = '  ';
+const defaultIgnoredExternalRedirectPattern =
+    '^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/|pci\\.org/)(?:[?#/].*)?$';
 const reportGroupOrder = [
     'Client Errors',
     'Server Errors',
@@ -208,7 +224,7 @@ export default class LinkIssues extends BaseJob {
     baseProtocol: string;
     baseHostname: string;
     allowedNonCanonicalLinks: string[] = [];
-    ignoredCanonicalQueryVariantPatterns: RegExp[] = [];
+    ignoredIssuePatterns: IgnoredIssuePattern[] = [];
     undesirablePathCharacterPattern = /[^\w\-/.]/;
     emailReportTriggerLevels: LinkIssueSeverity[]|null = ['error', 'warning', 'notice'];
     includeNotices: boolean;
@@ -237,7 +253,12 @@ export default class LinkIssues extends BaseJob {
         const config = this.config.getJobConfig<LinkIssuesConfig>({
             allowedNonCanonicalLinks: [],
             emailReportTriggerLevels: ['error', 'warning', 'notice'],
-            ignoredCanonicalQueryVariantPatterns: [],
+            ignoredIssuePatterns: [
+                {
+                    codes: ['external-redirect'],
+                    urlPattern: defaultIgnoredExternalRedirectPattern
+                }
+            ],
             undesirablePathCharacterPattern: '[^\\w\\-/.]',
             emailReportEnabled: true
         }, this.command, false);
@@ -254,7 +275,7 @@ export default class LinkIssues extends BaseJob {
                 }
             });
         }
-        this.ignoredCanonicalQueryVariantPatterns = this.compilePatternList(config.ignoredCanonicalQueryVariantPatterns);
+        this.ignoredIssuePatterns = this.compileIgnoredIssuePatterns(config.ignoredIssuePatterns);
     }
 
     shouldSendEmailReport(): boolean {
@@ -476,7 +497,70 @@ export default class LinkIssues extends BaseJob {
         return this.isFilteredInternalUrl(issue.sourceUrl)
             || this.isFilteredInternalUrl(issue.targetUrl)
             || this.isFilteredInternalUrl(issue.normalizedUrl)
-            || this.isFilteredInternalUrl(issue.finalUrl);
+            || this.isFilteredInternalUrl(issue.finalUrl)
+            || this.matchesIgnoredIssuePattern(issue);
+    }
+
+    private matchesIgnoredIssuePattern(issue: LinkIssue): boolean {
+        if(this.ignoredIssuePatterns.length === 0) {
+            return false;
+        }
+
+        const candidates = this.getIgnoredIssueUrlCandidates(issue);
+        if(candidates.length === 0) {
+            return false;
+        }
+
+        return this.ignoredIssuePatterns.some(ignore => {
+            if(ignore.codes !== null && !ignore.codes.has(issue.code)) {
+                return false;
+            }
+            if(ignore.groups !== null && !ignore.groups.has(issue.group)) {
+                return false;
+            }
+            if(ignore.severities !== null && !ignore.severities.has(issue.severity)) {
+                return false;
+            }
+
+            return candidates.some(candidate => {
+                ignore.pattern.lastIndex = 0;
+                return ignore.pattern.test(candidate);
+            });
+        });
+    }
+
+    private getIgnoredIssueUrlCandidates(issue: LinkIssue): string[] {
+        const candidates = new Set<string>();
+        [
+            issue.targetUrl,
+            issue.sourceUrl,
+            issue.rawHref,
+            issue.normalizedUrl,
+            issue.pageUrl,
+            issue.linkedUrl,
+            issue.canonicalUrl,
+            issue.expectedCanonicalUrl,
+            issue.finalUrl,
+            ...(issue.redirectChain ?? [])
+        ].forEach(url => {
+            if(typeof url !== 'string' || url === '') {
+                return;
+            }
+
+            candidates.add(url);
+            try {
+                const parsed = new URL(url, this.baseUrl);
+                candidates.add(parsed.href);
+                candidates.add(`${parsed.pathname}${parsed.search}`);
+                if(this.normalizeHostname(parsed.hostname) === this.baseHostname) {
+                    candidates.add(this.normalizeInternalUrl(parsed.href));
+                }
+            } catch {
+                // Keep the raw value as the only candidate.
+            }
+        });
+
+        return Array.from(candidates);
     }
 
     private isFilteredInternalUrl(url?: string): boolean {
@@ -1143,13 +1227,14 @@ export default class LinkIssues extends BaseJob {
                 return [
                     'These external links returned redirect responses to HEAD checks.',
                     'Replace the href with the final public destination when stable, or leave intentional third-party redirects alone after verification.',
+                    'To suppress known intentional third-party redirects, add an ignoredIssuePatterns entry with codes ["external-redirect"] and a urlPattern matching that destination, for example {"codes":["external-redirect"],"urlPattern":"^https?://example\\\\.com/(?:[?#/].*)?$"}.',
                     'Use a browser or curl to confirm the target because some external services handle HEAD differently than GET.'
                 ];
             case 'external-error':
                 return [
                     `These external links returned ${status}error responses to crawler checks.`,
                     'Verify the URL in a browser, then update it to a reachable destination or remove it if the resource is gone.',
-                    'If the site blocks automated checks but works for users, document that decision before suppressing or ignoring it.'
+                    'If the site blocks automated checks but works for users, document that decision before suppressing it with an ignoredIssuePatterns entry using codes ["external-error"] and a urlPattern matching that destination, for example {"codes":["external-error"],"urlPattern":"^https?://example\\\\.com/(?:[?#/].*)?$"}.'
                 ];
             case 'external-http-upgrade-available':
                 return [
@@ -1161,12 +1246,14 @@ export default class LinkIssues extends BaseJob {
                 return [
                     'The crawler could not verify these external links because DNS lookup returned EAI_AGAIN, which means the local resolver reported a temporary name-resolution failure.',
                     'Before changing site code or removing the link, verify the URL from the target project environment with a command such as `curl -I <url>` or `curl -L -I <url>`.',
-                    'If curl/browser verification succeeds, treat this as a crawler environment DNS issue; if it fails from a normal shell too, investigate the hostname, DNS records, or network resolver.'
+                    'If curl/browser verification succeeds and the destination is expected to keep failing in this crawler environment, suppress only that finding with an ignoredIssuePatterns entry using codes ["external-dns-temporary-failure"] and a urlPattern matching that destination.',
+                    'If it fails from a normal shell too, investigate the hostname, DNS records, or network resolver.'
                 ];
             case 'external-fetch-failed':
                 return [
                     'These external links did not respond to the crawler HEAD request.',
                     'Verify each target manually; replace dead URLs, remove obsolete links, or keep working URLs that merely block automated checks.',
+                    'To keep verified HEAD-blocking destinations out of future prompts, add an ignoredIssuePatterns entry with codes ["external-fetch-failed"] and a urlPattern matching that destination.',
                     'Avoid changing working third-party URLs solely because their server rejects HEAD requests.'
                 ];
             case 'missing-canonical':
@@ -1228,7 +1315,7 @@ export default class LinkIssues extends BaseJob {
                 return [
                     'These internal links include a query string while the target page canonical points to the same URL without that query string.',
                     'Confirm the query string represents intentional UI state, campaign data, or an action trigger rather than distinct indexable content.',
-                    'If the query variant is expected, add a matching ignoredCanonicalQueryVariantPatterns entry so future notice output stays focused.'
+                    'If the query variant is expected, add an ignoredIssuePatterns entry using codes ["canonical-query-variant"] and a urlPattern that matches the path/query form, for example {"codes":["canonical-query-variant"],"urlPattern":"^/\\\\?catalog-request$"}.'
                 ];
             case 'malformed-href':
                 return [
@@ -1794,23 +1881,59 @@ export default class LinkIssues extends BaseJob {
         }
     }
 
-    private compilePatternList(patterns: string[]): RegExp[] {
+    private compileIgnoredIssuePatterns(patterns: IgnoredIssuePatternConfig[]): IgnoredIssuePattern[] {
         if(!Array.isArray(patterns)) {
             return [];
         }
 
-        const compiled: RegExp[] = [];
-        patterns.forEach(pattern => {
-            if(typeof pattern !== 'string' || pattern === '') {
+        const compiled: IgnoredIssuePattern[] = [];
+        patterns.forEach(config => {
+            if(typeof config !== 'object' || config === null
+                || typeof config.urlPattern !== 'string' || config.urlPattern === '') {
                 return;
             }
             try {
-                compiled.push(new RegExp(pattern));
+                compiled.push({
+                    pattern: new RegExp(config.urlPattern),
+                    codes: this.compileStringSelector(config.codes),
+                    groups: this.compileStringSelector(config.groups),
+                    severities: this.compileSeveritySelector(config.severities)
+                });
             } catch {
                 // Invalid ignore patterns are skipped so one typo does not disable the job.
             }
         });
         return compiled;
+    }
+
+    private compileStringSelector(values?: string[]): Set<string>|null {
+        if(!Array.isArray(values)) {
+            return null;
+        }
+
+        const selector = new Set<string>();
+        values.forEach(value => {
+            if(typeof value === 'string' && value !== '') {
+                selector.add(value);
+            }
+        });
+
+        return selector.size > 0 ? selector : null;
+    }
+
+    private compileSeveritySelector(values?: LinkIssueSeverity[]): Set<LinkIssueSeverity>|null {
+        if(!Array.isArray(values)) {
+            return null;
+        }
+
+        const selector = new Set<LinkIssueSeverity>();
+        values.forEach(value => {
+            if(linkIssueSeverities.includes(value)) {
+                selector.add(value);
+            }
+        });
+
+        return selector.size > 0 ? selector : null;
     }
 
     private normalizeEmailReportTriggerLevels(levels: LinkIssueSeverity[]|null): LinkIssueSeverity[]|null {
@@ -2553,23 +2676,21 @@ export default class LinkIssues extends BaseJob {
         const pattern = new RegExp(`^${escapeRegExp(basePath)}`);
         if(pageData.location.url !== normalizedCanonical
             && this.isCanonicalQueryVariant(pageData.location.url, normalizedCanonical)) {
-            if(!this.shouldIgnoreCanonicalQueryVariant(pageData.location.url)) {
-                this.addIssue({
-                    severity: 'notice',
-                    group: 'Canonical Issues',
-                    code: 'canonical-query-variant',
-                    message: 'Internal link target differs from its canonical URL only by query string.',
-                    targetUrl: pageData.location.url,
-                    sourceUrl: pageData.location.referer,
-                    htmlSnippet: pageData.location.htmlSnippet,
-                    finalUrl: normalizedCanonical,
-                    pageUrl: pageData.location.url,
-                    linkedUrl: pageData.location.url,
-                    canonicalUrl: normalizedCanonical,
-                    expectedCanonicalUrl: normalizedCanonical,
-                    zone: 'unknown'
-                });
-            }
+            this.addIssue({
+                severity: 'notice',
+                group: 'Canonical Issues',
+                code: 'canonical-query-variant',
+                message: 'Internal link target differs from its canonical URL only by query string.',
+                targetUrl: pageData.location.url,
+                sourceUrl: pageData.location.referer,
+                htmlSnippet: pageData.location.htmlSnippet,
+                finalUrl: normalizedCanonical,
+                pageUrl: pageData.location.url,
+                linkedUrl: pageData.location.url,
+                canonicalUrl: normalizedCanonical,
+                expectedCanonicalUrl: normalizedCanonical,
+                zone: 'unknown'
+            });
         } else if(pageData.location.url !== normalizedCanonical
             && this.allowedNonCanonicalLinks.indexOf(normalizedCanonical.replace(pattern, '')) === -1) {
             this.nonCanonicalTargets.add(pageData.location.url);
@@ -2603,29 +2724,6 @@ export default class LinkIssues extends BaseJob {
         } catch {
             return false;
         }
-    }
-
-    private shouldIgnoreCanonicalQueryVariant(url: string): boolean {
-        if(this.ignoredCanonicalQueryVariantPatterns.length === 0) {
-            return false;
-        }
-
-        let normalizedUrl = url;
-        let pathWithQuery = '';
-        try {
-            const parsed = new URL(url, this.baseUrl);
-            normalizedUrl = this.normalizeInternalUrl(parsed.href);
-            pathWithQuery = `${parsed.pathname}${parsed.search}`;
-        } catch {
-            // Keep the original URL as the only match candidate.
-        }
-
-        return this.ignoredCanonicalQueryVariantPatterns.some(pattern => {
-            pattern.lastIndex = 0;
-            const normalizedMatch = pattern.test(normalizedUrl);
-            pattern.lastIndex = 0;
-            return normalizedMatch || (pathWithQuery !== '' && pattern.test(pathWithQuery));
-        });
     }
 
     private shouldSkipOutgoingLinkAudit(pageData: PageData, canonicalUrl: string|null): boolean {

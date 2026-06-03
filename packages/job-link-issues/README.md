@@ -73,7 +73,12 @@ Default config:
   "emailReportTriggerLevels": ["error", "warning", "notice"],
   "undesirablePathCharacterPattern": "[^\\w\\-/.]",
   "allowedNonCanonicalLinks": [],
-  "ignoredCanonicalQueryVariantPatterns": []
+  "ignoredIssuePatterns": [
+    {
+      "codes": ["external-redirect"],
+      "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/|pci\\.org/)(?:[?#/].*)?$"
+    }
+  ]
 }
 ```
 
@@ -85,14 +90,64 @@ Default config:
 | `emailReportTriggerLevels` | array or `null` | `["error", "warning", "notice"]` | Severity levels that are allowed to trigger the email report. Valid values are `error`, `warning`, and `notice`. Set to `null` or an empty array to allow the report whenever the job has findings. |
 | `undesirablePathCharacterPattern` | string | `"[^\\w\\-/.]"` | Regular expression used against decoded internal URL paths. Matching paths create notice-level URL path quality findings. |
 | `allowedNonCanonicalLinks` | string[] | `[]` | Path allowlist for internal pages that may point to a different canonical URL without being reported. Entries are compared after the configured `baseUrl` is removed from the normalized canonical target. |
-| `ignoredCanonicalQueryVariantPatterns` | string[] | `[]` | Regular expression patterns for query-string URL variants that should not create notice-level canonical query variant findings. Patterns are tested against the normalized full URL and the path/query form, such as `^https://www.example.com/\\?catalog-request$` or `^/\\?catalog-request$`. |
+| `ignoredIssuePatterns` | object[] | social/share `external-redirect` defaults | Suppress matching findings by URL pattern plus optional `codes`, `groups`, and `severities` selectors. Patterns are tested against URL-like issue fields and parsed path/query forms. |
+
+Each `ignoredIssuePatterns` entry supports:
+
+```json
+{
+  "codes": ["external-redirect"],
+  "groups": ["External Links"],
+  "severities": ["warning"],
+  "urlPattern": "^https?://example\\.com/expected-redirect(?:[?#/].*)?$"
+}
+```
+
+The default suppresses only `external-redirect` findings for common social,
+share, and third-party destinations that frequently redirect by design:
+Facebook, LinkedIn, X/Twitter, Threads, Bluesky, YouTube, Instagram, Google
+Maps short URLs, and `pci.org`. Other issue codes for those links still report.
+
+Projects can add broader external redirect ignores when those third-party
+destinations are intentionally outside your control:
+
+```json
+{
+  "codes": ["external-redirect"],
+  "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|youtu\\.be/|youtube\\.com/watch|doi\\.org/|goo\\.gl/maps/|globalsign\\.com/ssl|instagram\\.com/|pci\\.org/|soiltesting\\.org/?|smartscholar\\.com/civil-engineering-guide/?)(?:[?#/].*)?$"
+}
+```
 
 Internal links whose only canonical mismatch is the query string are reported as
 notices, not warnings. This catches links such as `/?catalog-request` when the
 page canonical is `/`, while still treating path, host, and protocol canonical
-mismatches as warnings. Use `ignoredCanonicalQueryVariantPatterns` for known
-query-driven UI states, campaign parameters, modal triggers, or action flags
-that should stay out of notice output.
+mismatches as warnings. Use `ignoredIssuePatterns` for known query-driven UI
+states, campaign parameters, modal triggers, or action flags that should stay
+out of notice output:
+
+```json
+{
+  "codes": ["canonical-query-variant"],
+  "urlPattern": "^/\\?catalog-request$"
+}
+```
+
+### Issue Codes
+
+Use these values in an `ignoredIssuePatterns` entry's `codes` array when you
+want the ignore to apply only to specific finding types.
+
+| Area | Codes |
+| --- | --- |
+| Crawl status | `fetch-failed`, `client-error`, `server-error` |
+| Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-chain`, `redirect-final-target-non-canonical` |
+| External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-dns-temporary-failure`, `external-fetch-failed` |
+| Canonical issues | `missing-canonical`, `multiple-canonicals`, `empty-canonical`, `malformed-canonical`, `offsite-canonical`, `http-canonical`, `canonical-query-variant`, `non-canonical-internal-link`, `canonical-target-failed`, `canonical-target-redirects` |
+| Placeholder links | `missing-href`, `empty-href`, `hash-placeholder` |
+| Malformed links | `malformed-href`, `control-character-href` |
+| Unsafe protocols | `javascript-href`, `vbscript-href`, `non-web-protocol` |
+| Internal link hygiene | `insecure-internal-link`, `target-blank-rel` |
+| Fragments and URL quality | `missing-same-page-fragment`, `missing-cross-page-fragment`, `undesirable-path-character` |
 
 ## Finding Severity
 

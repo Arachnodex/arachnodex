@@ -3,5 +3,10 @@
   "emailReportTriggerLevels": ["error", "warning", "notice"],
   "undesirablePathCharacterPattern": "[^\\w\\-/.]",
   "allowedNonCanonicalLinks": [],
-  "ignoredCanonicalQueryVariantPatterns": []
+  "ignoredIssuePatterns": [
+    {
+      "codes": ["external-redirect"],
+      "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/|pci\\.org/)(?:[?#/].*)?$"
+    }
+  ]
 }
