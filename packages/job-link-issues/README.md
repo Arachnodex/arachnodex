@@ -76,7 +76,7 @@ Default config:
   "ignoredIssuePatterns": [
     {
       "codes": ["external-redirect"],
-      "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/|pci\\.org/)(?:[?#/].*)?$"
+      "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/)(?:[?#/].*)?$"
     }
   ]
 }
@@ -104,19 +104,13 @@ Each `ignoredIssuePatterns` entry supports:
 ```
 
 The default suppresses only `external-redirect` findings for common social,
-share, and third-party destinations that frequently redirect by design:
-Facebook, LinkedIn, X/Twitter, Threads, Bluesky, YouTube, Instagram, Google
-Maps short URLs, and `pci.org`. Other issue codes for those links still report.
+share, video, and map destinations that frequently redirect by design:
+Facebook, LinkedIn, X/Twitter, Threads, Bluesky, YouTube, Instagram, and Google
+Maps short URLs. Other issue codes for those links still report.
 
-Projects can add broader external redirect ignores when those third-party
-destinations are intentionally outside your control:
-
-```json
-{
-  "codes": ["external-redirect"],
-  "urlPattern": "^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|youtu\\.be/|youtube\\.com/watch|doi\\.org/|goo\\.gl/maps/|globalsign\\.com/ssl|instagram\\.com/|pci\\.org/|soiltesting\\.org/?|smartscholar\\.com/civil-engineering-guide/?)(?:[?#/].*)?$"
-}
-```
+Projects can add their own external redirect ignores for domain-specific
+third-party destinations, but package defaults and examples intentionally avoid
+niche domains that may be broken or no longer relevant for other integrations.
 
 Internal links whose only canonical mismatch is the query string are reported as
 notices, not warnings. This catches links such as `/?catalog-request` when the
@@ -141,7 +135,7 @@ want the ignore to apply only to specific finding types.
 | --- | --- |
 | Crawl status | `fetch-failed`, `client-error`, `server-error` |
 | Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-chain`, `redirect-final-target-non-canonical` |
-| External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-dns-temporary-failure`, `external-fetch-failed` |
+| External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-bot-protection`, `external-dns-temporary-failure`, `external-fetch-failed` |
 | Canonical issues | `missing-canonical`, `multiple-canonicals`, `empty-canonical`, `malformed-canonical`, `offsite-canonical`, `http-canonical`, `canonical-query-variant`, `non-canonical-internal-link`, `canonical-target-failed`, `canonical-target-redirects` |
 | Placeholder links | `missing-href`, `empty-href`, `hash-placeholder` |
 | Malformed links | `malformed-href`, `control-character-href` |
@@ -172,7 +166,11 @@ anchors can still appear in the report without `-e` when they trigger regular
 anchor hygiene findings, such as malformed hrefs, unsafe protocols, or
 `target="_blank"` links missing `rel="noopener"`/`rel="noreferrer"`.
 
-When external checks are enabled, the job uses the `@arachnodex/bot-protection-heuristics` package through `@arachnodex/core` to recognize common WAF, CAPTCHA, and browser-challenge responses. Those responses are treated as inconclusive instead of broken because many third-party sites block automated HEAD or GET checks while still serving normal browsers.
+When external checks are enabled, the job uses the `@arachnodex/bot-protection-heuristics` package through `@arachnodex/core` to recognize common WAF, CAPTCHA, and browser-challenge responses. Responses that match those markers are reported as notice-level `external-bot-protection` findings instead of broken-link errors because many third-party sites block automated HEAD or GET checks while still serving normal browsers.
+
+Unmatched network failures, timeouts, DNS failures, and ordinary error responses still report as external-link findings such as `external-fetch-failed`, `external-dns-temporary-failure`, or `external-error`; they are not downgraded to bot-protection notices unless the response matches a configured bot-protection marker.
+
+External checks use a browser-shaped user agent so third-party sites that reject explicit crawler identifiers can still be verified. This does not change the core crawler's default Arachnodex user agent for normal crawl requests.
 
 Crawler TLS behavior for external HTTPS checks follows the core `requestTls.rejectUnauthorized` setting.
 

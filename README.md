@@ -380,7 +380,7 @@ Package:
 
 This package contains marker lists used to detect common bot protection, WAF, CAPTCHA, and challenge/interstitial responses.
 
-The official `link-issues` job uses these markers during external-link audits. If an external URL returns something that looks like a bot challenge, the job skips the broken-link finding instead of reporting a false positive. That matters most for CDNs, WAF-protected sites, and services that reject crawler-style HEAD requests but still work in a browser.
+The official `link-issues` job uses these markers during external-link audits. If an external URL returns a response matching one of the bot-protection markers, the job reports a notice-level `external-bot-protection` finding instead of reporting a broken-link error. Unmatched network failures, DNS failures, timeouts, and ordinary error responses still report as external-link problems. That distinction matters most for CDNs, WAF-protected sites, and services that reject crawler-style HEAD requests but still work in a browser.
 
 Keeping the markers separate lets Arachnodex update bot-protection detection without requiring a full core crawler or job release. Updating `@arachnodex/bot-protection-heuristics` can improve how `link-issues` classifies those external responses.
 

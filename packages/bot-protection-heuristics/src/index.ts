@@ -17,7 +17,10 @@ export const botProtectionHeuristics: BotProtectionHeuristics = {
         'cf-mitigated: challenge',
 
         // DataDome
-        'datadome'
+        'datadome',
+
+        // Akamai
+        'server: akamaighost'
     ],
     bodyMarkers: [
         // Imperva / Incapsula
@@ -32,6 +35,9 @@ export const botProtectionHeuristics: BotProtectionHeuristics = {
         'captcha',
 
         // DataDome
-        'datadome'
+        'datadome',
+
+        // Akamai
+        'errors.edgesuite.net'
     ]
 };

@@ -174,12 +174,15 @@ export default class LinkIssues extends BaseJob {
     private auditExternalLinks;
     private auditExternalLinkWithTimeout;
     private auditExternalLink;
+    private addExternalBotProtectionNotice;
     private externalGetShowsReachableOrProtected;
+    private externalGetShowsReachable;
     private getExternalFallbackConfig;
     private isTemporaryDnsFailure;
     private getReachableHttpsUpgradeUrl;
     private getHttpsUpgradeUrl;
-    private externalGetShowsBotProtection;
+    private getExternalBotProtectionStatus;
+    private getExternalOrHttpsUpgradeBotProtectionStatus;
     private externalGet;
     private externalHead;
     private getExternalRequestConfig;

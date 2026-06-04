@@ -177,9 +177,13 @@ const externalCheckConcurrency = 10;
 const externalCheckTimeoutMs = 5000;
 const externalCheckMaxAttempts = 3;
 const externalCheckUrlTimeoutMs = externalCheckTimeoutMs * externalCheckMaxAttempts;
+const externalCheckRequestHeaders: Record<string, string> = {
+    ...defaultRequestHeaders,
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+};
 const reportIndent = '  ';
 const defaultIgnoredExternalRedirectPattern =
-    '^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/|pci\\.org/)(?:[?#/].*)?$';
+    '^https?://(?:www\\.)?(?:facebook\\.com/(?:sharer|share_channel)|linkedin\\.com/(?:shareArticle|uas/login)|(?:x|twitter)\\.com/(?:intent/tweet|share)|threads\\.net/(?:intent/post|share)|bsky\\.app/intent/compose|youtu\\.be/|youtube\\.com/watch|instagram\\.com/|goo\\.gl/maps/)(?:[?#/].*)?$';
 const reportGroupOrder = [
     'Client Errors',
     'Server Errors',
@@ -1236,6 +1240,12 @@ export default class LinkIssues extends BaseJob {
                     'Verify the URL in a browser, then update it to a reachable destination or remove it if the resource is gone.',
                     'If the site blocks automated checks but works for users, document that decision before suppressing it with an ignoredIssuePatterns entry using codes ["external-error"] and a urlPattern matching that destination, for example {"codes":["external-error"],"urlPattern":"^https?://example\\\\.com/(?:[?#/].*)?$"}.'
                 ];
+            case 'external-bot-protection':
+                return [
+                    'These external links returned bot protection or edge security responses to crawler checks.',
+                    'Verify the URL in a browser before changing site content; these notices usually mean the third-party site rejected automated verification rather than the link being broken.',
+                    'To keep expected protected destinations out of notice output, add an ignoredIssuePatterns entry with codes ["external-bot-protection"] and a urlPattern matching that destination.'
+                ];
             case 'external-http-upgrade-available':
                 return [
                     'These external HTTP links failed, but the same URL works over HTTPS.',
@@ -1614,6 +1624,9 @@ export default class LinkIssues extends BaseJob {
         }
         if(issue.code === 'external-fetch-failed') {
             return 'External Fetch Failed';
+        }
+        if(issue.code === 'external-bot-protection') {
+            return 'External Bot Protection';
         }
         if(issue.code === 'fetch-failed') {
             return 'Fetch Failed';
@@ -2137,7 +2150,7 @@ export default class LinkIssues extends BaseJob {
             maxRedirects: 0,
             timeout: externalCheckTimeoutMs,
             headers: {
-                ...defaultRequestHeaders
+                ...externalCheckRequestHeaders
             },
             httpAgent: new http.Agent({
                 timeout: externalCheckTimeoutMs
@@ -2210,6 +2223,7 @@ export default class LinkIssues extends BaseJob {
         try {
             const response = await this.externalHead(externalLink.targetUrl, config);
             if(this.isBotProtectionResponse(response)) {
+                this.addExternalBotProtectionNotice(externalLink, response.status);
                 return;
             }
         } catch (e) {
@@ -2219,6 +2233,7 @@ export default class LinkIssues extends BaseJob {
 
             if(axios.isAxiosError(e) && typeof e.response !== 'undefined') {
                 if(this.isBotProtectionResponse(e.response)) {
+                    this.addExternalBotProtectionNotice(externalLink, e.response.status);
                     return;
                 }
                 const status = e.response.status;
@@ -2261,9 +2276,22 @@ export default class LinkIssues extends BaseJob {
                         return;
                     }
 
+                    const fallbackConfig = this.getExternalFallbackConfig(config);
+                    const protectedStatus = await this.getExternalOrHttpsUpgradeBotProtectionStatus(
+                        externalLink.targetUrl,
+                        fallbackConfig
+                    );
+                    if(protectedStatus !== null) {
+                        this.addExternalBotProtectionNotice(externalLink, protectedStatus);
+                        return;
+                    }
+                    if(this.runtime.aborted) {
+                        return;
+                    }
+
                     if(await this.externalGetShowsReachableOrProtected(
                         externalLink.targetUrl,
-                        this.getExternalFallbackConfig(config)
+                        fallbackConfig
                     )) {
                         return;
                     }
@@ -2329,10 +2357,12 @@ export default class LinkIssues extends BaseJob {
                 return;
             }
 
-            if(await this.externalGetShowsBotProtection(
+            const protectedStatus = await this.getExternalOrHttpsUpgradeBotProtectionStatus(
                 externalLink.targetUrl,
                 this.getExternalFallbackConfig(config)
-            )) {
+            );
+            if(protectedStatus !== null) {
+                this.addExternalBotProtectionNotice(externalLink, protectedStatus);
                 return;
             }
             if(this.runtime.aborted) {
@@ -2352,6 +2382,26 @@ export default class LinkIssues extends BaseJob {
                 zone
             });
         }
+    }
+
+    private addExternalBotProtectionNotice(externalLink: ExternalLinkRecord, statusCode?: number): void {
+        const sourceUrl = Array.from(externalLink.sources)[0];
+        const rawHref = Array.from(externalLink.rawHrefs)[0];
+        const htmlSnippet = Array.from(externalLink.htmlSnippets)[0];
+        const zone = Array.from(externalLink.zones)[0] ?? 'unknown';
+
+        this.addIssue({
+            severity: 'notice',
+            group: 'External Links',
+            code: 'external-bot-protection',
+            message: 'External link returned a bot protection or edge security response.',
+            targetUrl: externalLink.targetUrl,
+            sourceUrl,
+            rawHref,
+            htmlSnippet,
+            statusCode,
+            zone
+        });
     }
 
     private async externalGetShowsReachableOrProtected(url: string, config: AxiosRequestConfig): Promise<boolean> {
@@ -2375,6 +2425,26 @@ export default class LinkIssues extends BaseJob {
                     this.isBotProtectionResponse(e.response)
                     || e.response.status >= 200 && e.response.status < 400
                 );
+        }
+    }
+
+    private async externalGetShowsReachable(url: string, config: AxiosRequestConfig): Promise<boolean> {
+        if(this.runtime.aborted) {
+            return false;
+        }
+
+        try {
+            const response = await this.externalGet(url, config, false);
+            return response.status >= 200 && response.status < 400;
+        } catch (e) {
+            if(this.runtime.aborted || this.isAbortError(e)) {
+                return false;
+            }
+
+            return axios.isAxiosError(e)
+                && typeof e.response !== 'undefined'
+                && e.response.status >= 200
+                && e.response.status < 400;
         }
     }
 
@@ -2402,7 +2472,7 @@ export default class LinkIssues extends BaseJob {
         const fallbackConfig = this.getExternalFallbackConfig(config);
         try {
             const response = await this.externalHead(httpsUrl, fallbackConfig, false);
-            if(response.status >= 200 && response.status < 300 || this.isBotProtectionResponse(response)) {
+            if(response.status >= 200 && response.status < 300) {
                 return httpsUrl;
             }
         } catch (e) {
@@ -2411,8 +2481,7 @@ export default class LinkIssues extends BaseJob {
             }
 
             if(axios.isAxiosError(e) && typeof e.response !== 'undefined') {
-                if(this.isBotProtectionResponse(e.response)
-                    || e.response.status >= 200 && e.response.status < 400) {
+                if(e.response.status >= 200 && e.response.status < 400) {
                     return httpsUrl;
                 }
             }
@@ -2422,7 +2491,7 @@ export default class LinkIssues extends BaseJob {
             return null;
         }
 
-        return await this.externalGetShowsReachableOrProtected(httpsUrl, fallbackConfig)
+        return await this.externalGetShowsReachable(httpsUrl, fallbackConfig)
             ? httpsUrl
             : null;
     }
@@ -2447,23 +2516,41 @@ export default class LinkIssues extends BaseJob {
         return parsed.href;
     }
 
-    private async externalGetShowsBotProtection(url: string, config: AxiosRequestConfig): Promise<boolean> {
+    private async getExternalBotProtectionStatus(url: string, config: AxiosRequestConfig): Promise<number|null> {
         if(this.runtime.aborted) {
-            return false;
+            return null;
         }
 
         try {
             const response = await this.externalGet(url, config, false);
-            return this.isBotProtectionResponse(response);
+            return this.isBotProtectionResponse(response) ? response.status : null;
         } catch (e) {
             if(this.runtime.aborted || this.isAbortError(e)) {
-                return false;
+                return null;
             }
 
-            return axios.isAxiosError(e)
+            if(axios.isAxiosError(e)
                 && typeof e.response !== 'undefined'
-                && this.isBotProtectionResponse(e.response);
+                && this.isBotProtectionResponse(e.response)) {
+                return e.response.status;
+            }
+
+            return null;
         }
+    }
+
+    private async getExternalOrHttpsUpgradeBotProtectionStatus(url: string, config: AxiosRequestConfig): Promise<number|null> {
+        const status = await this.getExternalBotProtectionStatus(url, config);
+        if(status !== null) {
+            return status;
+        }
+
+        const httpsUrl = this.getHttpsUpgradeUrl(url);
+        if(httpsUrl === null || this.runtime.aborted) {
+            return null;
+        }
+
+        return await this.getExternalBotProtectionStatus(httpsUrl, config);
     }
 
     private async externalGet(url: string, config: AxiosRequestConfig, retry = true): Promise<AxiosResponse<string>> {
