@@ -28,6 +28,18 @@ Run it with external link checks and notice-level findings:
 npm exec -- arachnodex -c default -j link-issues -e -n
 ```
 
+Run it with asset checks:
+
+```sh
+npm exec -- arachnodex -c default -j link-issues -a
+```
+
+Add `-e` when you also want HEAD-only availability checks for external asset URLs:
+
+```sh
+npm exec -- arachnodex -c default -j link-issues -a -e
+```
+
 Run it with copy/paste prompt output:
 
 ```sh
@@ -71,6 +83,7 @@ Default config:
 {
   "emailReportEnabled": true,
   "emailReportTriggerLevels": ["error", "warning", "notice"],
+  "includeAssets": false,
   "undesirablePathCharacterPattern": "[^\\w\\-/.]",
   "allowedNonCanonicalLinks": [],
   "ignoredIssuePatterns": [
@@ -88,6 +101,7 @@ Default config:
 | --- | --- | --- | --- |
 | `emailReportEnabled` | boolean | `true` | Include the Link Issues job report in Arachnodex report emails. |
 | `emailReportTriggerLevels` | array or `null` | `["error", "warning", "notice"]` | Severity levels that are allowed to trigger the email report. Valid values are `error`, `warning`, and `notice`. Set to `null` or an empty array to allow the report whenever the job has findings. |
+| `includeAssets` | boolean | `false` | Check asset URLs found in HTML markup and same-site CSS/JS bodies. External asset availability checks require `includeExternal` / `-e`. |
 | `undesirablePathCharacterPattern` | string | `"[^\\w\\-/.]"` | Regular expression used against decoded internal URL paths. Matching paths create notice-level URL path quality findings. |
 | `allowedNonCanonicalLinks` | string[] | `[]` | Path allowlist for internal pages that may point to a different canonical URL without being reported. Entries are compared after the configured `baseUrl` is removed from the normalized canonical target. |
 | `ignoredIssuePatterns` | object[] | social/share `external-redirect` defaults | Suppress matching findings by URL pattern plus optional `codes`, `groups`, and `severities` selectors. Patterns are tested against URL-like issue fields and parsed path/query forms. |
@@ -136,6 +150,8 @@ want the ignore to apply only to specific finding types.
 | Crawl status | `fetch-failed`, `client-error`, `server-error` |
 | Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-chain`, `redirect-final-target-non-canonical` |
 | External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-bot-protection`, `external-dns-temporary-failure`, `external-fetch-failed` |
+| Asset links | `asset-redirect`, `asset-http-upgrade-available`, `asset-error`, `asset-bot-protection`, `asset-dns-temporary-failure`, `asset-fetch-failed` |
+| Asset security | `insecure-asset-url`, `iframe-missing-sandbox`, `iframe-missing-referrerpolicy`, `malformed-asset-url`, `unsupported-asset-protocol` |
 | Canonical issues | `missing-canonical`, `multiple-canonicals`, `empty-canonical`, `malformed-canonical`, `offsite-canonical`, `http-canonical`, `canonical-query-variant`, `non-canonical-internal-link`, `canonical-target-failed`, `canonical-target-redirects` |
 | Placeholder links | `missing-href`, `empty-href`, `hash-placeholder` |
 | Malformed links | `malformed-href`, `control-character-href` |
@@ -174,6 +190,29 @@ External checks use a browser-shaped user agent so third-party sites that reject
 
 Crawler TLS behavior for external HTTPS checks follows the core `requestTls.rejectUnauthorized` setting.
 
+## Asset Links
+
+Asset checks are disabled by default. Enable them with `-a` or config
+`includeAssets: true`. The job keeps asset requests private to Link Issues:
+asset URLs are not added to the shared crawler queue and cannot be emitted by
+the Sitemap job.
+
+When asset checks are enabled, the job inspects common asset references in page
+markup, including scripts, stylesheets, images and srcsets, icons, manifests,
+media sources, posters, tracks, iframes, embeds, objects, SVG image hrefs,
+inline styles, and common social image/video meta tags. Same-site asset
+availability is checked with HEAD requests. Same-site CSS and JavaScript bodies
+may be downloaded only after a successful HEAD response so the job can discover
+nested asset URLs such as CSS `url(...)`, `@import`, source maps, and
+conservative JavaScript asset string literals.
+
+External asset availability is checked only when external checks are also
+enabled with `-e`. Those checks use HEAD only; external CSS and JavaScript
+bodies are never downloaded or parsed.
+
+Asset checks also report HTTPS-page references to HTTP or protocol-relative
+assets, plus iframe embeds missing `sandbox` or `referrerpolicy` attributes.
+
 ## Switches
 
 | Switch | Description |
@@ -181,4 +220,5 @@ Crawler TLS behavior for external HTTPS checks follows the core `requestTls.reje
 | `-V`, `--version` | Print the Link Issues job version and exit without crawling. |
 | `-n`, `--include-notices` | Include notice-level findings. By default, only errors and warnings render. |
 | `-e`, `--include-external` | Check external links using HEAD requests with limited fallback behavior. This does not disable normal anchor hygiene reporting for external hrefs when omitted. |
+| `-a`, `--include-assets` | Check asset URLs found in page markup and same-site CSS/JS. External asset availability checks require `-e`. |
 | `-p`, `--prompt` | Output grouped findings as copy/paste prompts for another coding agent. |

@@ -30,6 +30,13 @@ export default class LinkIssuesCmd extends JobCommandParser {
                 description: 'Check external links using HEAD requests.',
                 note: 'External checks are deduped by URL and use the external-link timeout/retry policy.'
             },
+            '-a': {
+                switch: '-a',
+                aliases: ['--include-assets'],
+                value: false,
+                description: 'Check asset links found in page markup and same-site CSS/JS.',
+                note: 'External asset availability checks require --include-external and use HEAD only.'
+            },
             '-p': {
                 switch: '-p',
                 aliases: ['--prompt'],

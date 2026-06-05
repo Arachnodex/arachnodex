@@ -6,10 +6,19 @@ type MarkState = {
     last: bigint;
 }
 
+export type ProfilerEntry = {
+    namespace: string;
+    label: string;
+    stepSeconds: number;
+    totalSeconds: number;
+    message: string;
+}
+
 export class Profiler {
 
     private readonly startedAt = process.hrtime.bigint();
     private readonly marks = new Map<string, MarkState>();
+    private readonly entries: ProfilerEntry[] = [];
     private readonly console: OutputHelper;
     private enabled: boolean;
 
@@ -38,6 +47,10 @@ export class Profiler {
         return this.secondsSince(this.startedAt);
     }
 
+    getEntries(): ProfilerEntry[] {
+        return [...this.entries];
+    }
+
     private markEntry(namespace: string, label: string, message: string): void {
         if(!this.enabled) {
             return;
@@ -49,10 +62,18 @@ export class Profiler {
         const stepSeconds = typeof state === 'undefined'
             ? 0
             : this.secondsBetween(state.last, now);
+        const totalSeconds = this.secondsSince(this.startedAt);
 
         this.marks.set(key, {last: now});
+        this.entries.push({
+            namespace,
+            label,
+            stepSeconds,
+            totalSeconds,
+            message
+        });
         this.console.log(
-            `[profiler] ${namespace} ${label} +${stepSeconds.toFixed(2)}s (${this.secondsSince(this.startedAt).toFixed(2)}s total): ${message}`,
+            `[profiler] ${namespace} ${label} +${stepSeconds.toFixed(2)}s (${totalSeconds.toFixed(2)}s total): ${message}`,
             'gray',
             true
         );

@@ -37,6 +37,7 @@ export declare class ReportManager {
     private renderSubject;
     private renderErrorSubject;
     private renderErrorTemplate;
+    private getProfilerReportEntries;
     private getReportableErrors;
     private isSiteFindingError;
     private formatErrorReportEntry;

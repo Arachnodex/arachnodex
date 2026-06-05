@@ -6,7 +6,7 @@ import {fileURLToPath} from "url";
 import axios from "axios";
 import Handlebars from "handlebars";
 import nodemailer from 'nodemailer';
-import type SMTPConnection from "nodemailer/lib/smtp-connection/index.js";
+import type SMTPTransport from "nodemailer/lib/smtp-transport/index.js";
 import type {MailOptions} from "nodemailer/lib/smtp-transport/index.js";
 import type {Transporter} from "nodemailer";
 import {ConfigService} from "./configLoader.js";
@@ -45,6 +45,20 @@ type ErrorReportEntry = {
     fatal: boolean;
     locationDetails: Array<{label: string, value: string, valueHtml: string}>;
 }
+
+type ProfilerReportEntry = {
+    namespace: string;
+    label: string;
+    stepSeconds: string;
+    totalSeconds: string;
+    message: string;
+}
+
+type ReportSmtpOptions = SMTPTransport.Options & {
+    pool: true;
+    maxConnections: number;
+    maxMessages: number;
+};
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const resourceBase = [
@@ -150,10 +164,13 @@ export class ReportManager {
             throw new Error('No mail transport configuration.');
         }
 
-        const tspOptions: SMTPConnection.Options = {
+        const tspOptions: ReportSmtpOptions = {
             host: transportConfig.host,
             port: Number(transportConfig.port),
             secure: transportConfig.secure,
+            pool: true,
+            maxConnections: 1,
+            maxMessages: 1,
             tls: {
                 rejectUnauthorized: transportConfig.tls?.rejectUnauthorized ?? true
             }
@@ -254,26 +271,31 @@ export class ReportManager {
             stats,
             jobCount: jobs.length,
             jobNames: jobs.map(job => job.getName()).join(', '),
-            jobReportsHtml: jobReports.join('\n')
+            jobReportsHtml: jobReports.join('\n'),
+            profilerEntries: this.getProfilerReportEntries()
         });
     }
 
     private async sendMail(mailer: Transporter, mailOptions: MailOptions, label: string): Promise<boolean> {
         const recipients = this.mailOptionToString(mailOptions.to);
-        if(recipients === '') {
-            this.console.log(`Email ${label} was not sent: no recipients configured.`, 'yellow.bold', true);
-            return false;
-        }
-
-        this.console.log(`Sending ${label} email to ${recipients}...`, 'cyan.bold', true);
         try {
-            await mailer.sendMail(mailOptions);
-            this.console.log(`Sent ${label} email successfully.`, 'green.bold', true);
-            return true;
-        } catch(e) {
-            this.console.log(`Failed to send ${label} email.`, 'red.bold', true);
-            this.console.log(e instanceof Error ? e.message : String(e), 'red', true);
-            return false;
+            if(recipients === '') {
+                this.console.log(`Email ${label} was not sent: no recipients configured.`, 'yellow.bold', true);
+                return false;
+            }
+
+            this.console.log(`Sending ${label} email to ${recipients}...`, 'cyan.bold', true);
+            try {
+                await mailer.sendMail(mailOptions);
+                this.console.log(`Sent ${label} email successfully.`, 'green.bold', true);
+                return true;
+            } catch(e) {
+                this.console.log(`Failed to send ${label} email.`, 'red.bold', true);
+                this.console.log(e instanceof Error ? e.message : String(e), 'red', true);
+                return false;
+            }
+        } finally {
+            mailer.close();
         }
     }
 
@@ -335,8 +357,19 @@ export class ReportManager {
             jobNames: jobs.map(job => job.getName()).join(', '),
             fatalOnly,
             errorCount: errors.length,
-            errors: errors.map((error, index) => this.formatErrorReportEntry(error, index))
+            errors: errors.map((error, index) => this.formatErrorReportEntry(error, index)),
+            profilerEntries: this.getProfilerReportEntries()
         });
+    }
+
+    private getProfilerReportEntries(): ProfilerReportEntry[] {
+        return this.profiler.getEntries().map(entry => ({
+            namespace: entry.namespace,
+            label: entry.label,
+            stepSeconds: entry.stepSeconds.toFixed(2),
+            totalSeconds: entry.totalSeconds.toFixed(2),
+            message: entry.message
+        }));
     }
 
     private getReportableErrors(errors: CrawlerError[], fatalOnly: boolean): CrawlerError[] {
@@ -391,11 +424,11 @@ export class ReportManager {
         return Object.entries(location)
             .filter(([, value]) => typeof value !== 'undefined')
             .map(([label, value]) => {
-                const formattedValue = Array.isArray(value) ? value.join(' => ') : String(value);
+                const stringValue = Array.isArray(value) ? value.join(' => ') : String(value);
                 return {
                     label,
-                    value: formattedValue,
-                    valueHtml: this.linkifyHtml(formattedValue)
+                    value: stringValue,
+                    valueHtml: this.linkifyHtml(stringValue)
                 };
             });
     }

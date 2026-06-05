@@ -341,7 +341,7 @@ Read the [Sitemap job README](packages/job-sitemap/README.md) for install notes,
 
 ### Link Issues
 
-`@arachnodex/job-link-issues` reports broken, malformed, non-canonical, insecure, placeholder, redirect, fragment, and optional external-link issues. External checks use the bot protection heuristics package to avoid false positives from common WAF, CAPTCHA, and browser-challenge responses. Reports and copy/paste prompts include bounded `Anchor HTML` snippets when available, and query-string-only canonical mismatches are notice-level findings that can be suppressed with the job config.
+`@arachnodex/job-link-issues` reports broken, malformed, non-canonical, insecure, placeholder, redirect, fragment, optional external-link issues, and optional asset-link issues for scripts, stylesheets, images, embeds, and nested same-site CSS/JS references. External checks use the bot protection heuristics package to avoid false positives from common WAF, CAPTCHA, and browser-challenge responses. Reports and copy/paste prompts include bounded source snippets when available, and query-string-only canonical mismatches are notice-level findings that can be suppressed with the job config.
 
 Read the [Link Issues job README](packages/job-link-issues/README.md) for install notes, usage examples, switches, finding severities, bot-protection behavior, and full job config settings.
 

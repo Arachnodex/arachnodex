@@ -356,6 +356,9 @@ export class Arachnodex {
             // Wait here if URL is currently being processed. Do not hold the
             // shared lock while waiting; the active request needs it to finish.
             while(!this.isFetchReady(location.url)) {
+                if(this.runtime.aborted) {
+                    return false;
+                }
                 await sleep(pollMs);
             }
 
@@ -666,6 +669,12 @@ export class Arachnodex {
         if(location !== undefined) {
             // Avoids double requesting URLs, will use cached response
             while(!this.isFetchReady(location.url)) {
+                if(this.runtime.aborted) {
+                    if(this.runtime.activeThreads.delete(thread)) {
+                        this.threadCount = Math.max(0, this.threadCount - 1);
+                    }
+                    return;
+                }
                 await sleep(pollMs);
             }
 
@@ -1165,6 +1174,7 @@ export class Arachnodex {
                 true
             );
         }
+        this.runtime.dispose();
 
         return 1;
     }

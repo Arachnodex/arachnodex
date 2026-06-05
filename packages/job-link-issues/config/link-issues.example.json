@@ -1,6 +1,7 @@
 {
   "emailReportEnabled": true,
   "emailReportTriggerLevels": ["error", "warning", "notice"],
+  "includeAssets": false,
   "undesirablePathCharacterPattern": "[^\\w\\-/.]",
   "allowedNonCanonicalLinks": [],
   "ignoredIssuePatterns": [

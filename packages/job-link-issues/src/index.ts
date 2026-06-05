@@ -46,6 +46,9 @@ type LinkIssue = {
     finalUrl?: string;
     redirectChain?: string[];
     zone?: LinkZone;
+    assetKind?: string;
+    sourceLabel?: string;
+    occurrenceDetails?: LinkOccurrence[];
 }
 
 interface IgnoredIssuePatternConfig extends JSONObject {
@@ -59,8 +62,54 @@ interface LinkIssuesConfig extends JSONObject {
     allowedNonCanonicalLinks: string[];
     emailReportEnabled: boolean;
     emailReportTriggerLevels: LinkIssueSeverity[]|null;
+    includeAssets: boolean;
     ignoredIssuePatterns: IgnoredIssuePatternConfig[];
     undesirablePathCharacterPattern: string;
+}
+
+type AssetKind =
+    'script'
+    | 'stylesheet'
+    | 'image'
+    | 'srcset'
+    | 'icon'
+    | 'manifest'
+    | 'preload'
+    | 'media'
+    | 'track'
+    | 'poster'
+    | 'iframe'
+    | 'embed'
+    | 'object'
+    | 'meta'
+    | 'svg'
+    | 'inline-style'
+    | 'css-url'
+    | 'css-import'
+    | 'css-source-map'
+    | 'js-url'
+    | 'js-source-map';
+
+type AssetRecord = {
+    targetUrl: string;
+    rawUrl: string;
+    sourceUrl: string;
+    sourceLabel: string;
+    kind: AssetKind;
+    htmlSnippet?: string;
+    zone: LinkZone;
+    isExternal: boolean;
+    occurrences: LinkOccurrence[];
+}
+
+type AssetReferenceContext = {
+    sourceUrl: string;
+    baseUrl: string;
+    sourceLabel: string;
+    kind: AssetKind;
+    htmlSnippet?: string;
+    zone: LinkZone;
+    occurrenceDetails?: LinkOccurrence[];
 }
 
 type IgnoredIssuePattern = {
@@ -177,6 +226,7 @@ const externalCheckConcurrency = 10;
 const externalCheckTimeoutMs = 5000;
 const externalCheckMaxAttempts = 3;
 const externalCheckUrlTimeoutMs = externalCheckTimeoutMs * externalCheckMaxAttempts;
+const assetBodyMaxBytes = 1024 * 1024;
 const externalCheckRequestHeaders: Record<string, string> = {
     ...defaultRequestHeaders,
     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
@@ -190,6 +240,8 @@ const reportGroupOrder = [
     'Failed Fetches',
     'Redirects',
     'External Links',
+    'Asset Links',
+    'Asset Security',
     'Canonical Issues',
     'Malformed Links',
     'URL Path Quality',
@@ -222,6 +274,8 @@ export default class LinkIssues extends BaseJob {
     pageAnchors = new Map<string, Set<string>>();
     fragmentRequests: FragmentRequest[] = [];
     externalLinks = new Map<string, ExternalLinkRecord>();
+    assetLinks = new Map<string, AssetRecord>();
+    scannedAssetBodies = new Set<string>();
     scannedPageCount = 0;
 
     baseUrl: string;
@@ -233,6 +287,7 @@ export default class LinkIssues extends BaseJob {
     emailReportTriggerLevels: LinkIssueSeverity[]|null = ['error', 'warning', 'notice'];
     includeNotices: boolean;
     includeExternal: boolean;
+    includeAssets: boolean;
     promptOutput: boolean;
 
     constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime) {
@@ -246,6 +301,8 @@ export default class LinkIssues extends BaseJob {
             || command.arguments['--include-notices']?.active === true;
         this.includeExternal = command.arguments['-e']?.active === true
             || command.arguments['--include-external']?.active === true;
+        this.includeAssets = command.arguments['-a']?.active === true
+            || command.arguments['--include-assets']?.active === true;
         this.promptOutput = command.arguments['-p']?.active === true
             || command.arguments['--prompt']?.active === true;
 
@@ -257,6 +314,7 @@ export default class LinkIssues extends BaseJob {
         const config = this.config.getJobConfig<LinkIssuesConfig>({
             allowedNonCanonicalLinks: [],
             emailReportTriggerLevels: ['error', 'warning', 'notice'],
+            includeAssets: false,
             ignoredIssuePatterns: [
                 {
                     codes: ['external-redirect'],
@@ -267,6 +325,7 @@ export default class LinkIssues extends BaseJob {
             emailReportEnabled: true
         }, this.command, false);
         this.emailReportEnabled = config.emailReportEnabled;
+        this.includeAssets = this.includeAssets || config.includeAssets === true;
         this.emailReportTriggerLevels = this.normalizeEmailReportTriggerLevels(config.emailReportTriggerLevels);
         this.undesirablePathCharacterPattern = this.compileUndesirablePathCharacterPattern(
             config.undesirablePathCharacterPattern
@@ -325,6 +384,8 @@ export default class LinkIssues extends BaseJob {
             'Notices': counts.notice,
             'External Checks Enabled': this.includeExternal,
             'External URLs Collected': this.externalLinks.size,
+            'Asset Checks Enabled': this.includeAssets,
+            'Asset URLs Collected': this.assetLinks.size,
             'Notices Included': this.includeNotices
         };
     }
@@ -432,6 +493,7 @@ export default class LinkIssues extends BaseJob {
         this.trackPageAnchors(_pageData);
         this.auditParseWarnings(_pageData);
         this.auditPageLinks(_pageData);
+        this.collectPageAssets(_pageData);
         this.processedPageUrls.add(_pageData.location.url);
     }
 
@@ -440,6 +502,8 @@ export default class LinkIssues extends BaseJob {
             // End-of-crawl checks need the full site picture: external URL de-dupes,
             // redirect chains, cross-page fragments, and canonical target statuses.
             this.profiler.markJob(this.handle, 'shutdown', 'starting shutdown');
+            await this.auditAssetLinks();
+            this.profiler.markJob(this.handle, 'shutdown', 'asset link audit complete');
             await this.auditExternalLinks();
             this.profiler.markJob(this.handle, 'shutdown', 'external link audit complete');
             this.auditRedirects();
@@ -477,12 +541,13 @@ export default class LinkIssues extends BaseJob {
         this.issues.push(issue);
         const key = this.getIssueKey(issue);
         const reportKey = this.getReportKey(issue);
-        if(typeof issue.sourceUrl === 'string' && typeof issue.zone !== 'undefined') {
-            this.recordIssueOccurrence(key, issue.sourceUrl, issue.zone);
+        const occurrenceDetails = this.getIssueOccurrenceDetails(issue);
+        occurrenceDetails.forEach(occurrence => {
+            this.recordIssueOccurrence(key, occurrence.referer, occurrence.zone);
             if(reportKey !== key) {
-                this.recordIssueOccurrence(reportKey, issue.sourceUrl, issue.zone);
+                this.recordIssueOccurrence(reportKey, occurrence.referer, occurrence.zone);
             }
-        }
+        });
     }
 
     private getIssueKey(issue: LinkIssue): string {
@@ -493,7 +558,9 @@ export default class LinkIssues extends BaseJob {
             issue.targetUrl ?? '',
             issue.normalizedUrl ?? '',
             issue.rawHref ?? '',
-            issue.statusCode ?? ''
+            issue.statusCode ?? '',
+            issue.assetKind ?? '',
+            issue.sourceLabel ?? ''
         ].join('|');
     }
 
@@ -801,11 +868,17 @@ export default class LinkIssues extends BaseJob {
                 ...this.getCanonicalDetailLines(issue)
             ];
         }
+        if(typeof issue.assetKind === 'string') {
+            details.push(`Asset kind: ${issue.assetKind}`);
+        }
+        if(typeof issue.sourceLabel === 'string') {
+            details.push(`Source context: ${issue.sourceLabel}`);
+        }
         if(typeof issue.rawHref === 'string') {
             details.push(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`);
         }
         if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
-            details.push(`Anchor HTML: ${issue.htmlSnippet}`);
+            details.push(`${this.isAssetIssue(issue) ? 'Source snippet' : 'Anchor HTML'}: ${issue.htmlSnippet}`);
         }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             details.push(`Normalized: ${issue.normalizedUrl}`);
@@ -1045,6 +1118,7 @@ export default class LinkIssues extends BaseJob {
     }
 
     private buildPromptText(section: PromptSection): string {
+        const assetSection = section.group === 'Asset Links' || section.group === 'Asset Security';
         const lines: string[] = [
             'You are working in a website or application codebase.',
             `An Arachnodex link issue report found ${section.entries.length} grouped finding(s) for this section.`,
@@ -1055,11 +1129,22 @@ export default class LinkIssues extends BaseJob {
             'Goal:',
             '- Find the code, template, CMS content, data, or configuration that creates these links/issues.',
             '- Fix only the listed issues for this section.',
-            '- Before changing markup, determine whether each listed anchor is true navigation or a UI/action trigger.',
-            '- If JavaScript event handlers, dropdown behavior, modal triggers, tabs, accordions, or similar UI behavior are attached, preserve that behavior while using the semantically correct element.',
-            '- Preserve existing behavior and avoid unrelated refactors.',
-            '- After making changes, run the project checks and rerun the link issue report if available.'
         ];
+        if(assetSection) {
+            lines.push(
+                '- Use each finding\'s asset kind, source context, raw URL, normalized URL, and source snippet to locate the generating markup, CSS, JavaScript, CMS field, or data source.',
+                '- Preserve existing rendering, loading order, responsive image behavior, embed behavior, and cache/versioning conventions.',
+                '- Preserve existing behavior and avoid unrelated refactors.',
+                '- After making changes, run the project checks and rerun the link issue report if available.'
+            );
+        } else {
+            lines.push(
+                '- Before changing markup, determine whether each listed anchor is true navigation or a UI/action trigger.',
+                '- If JavaScript event handlers, dropdown behavior, modal triggers, tabs, accordions, or similar UI behavior are attached, preserve that behavior while using the semantically correct element.',
+                '- Preserve existing behavior and avoid unrelated refactors.',
+                '- After making changes, run the project checks and rerun the link issue report if available.'
+            );
+        }
 
         const note = this.getPromptSectionNote(section);
         if(note !== '') {
@@ -1265,6 +1350,72 @@ export default class LinkIssues extends BaseJob {
                     'Verify each target manually; replace dead URLs, remove obsolete links, or keep working URLs that merely block automated checks.',
                     'To keep verified HEAD-blocking destinations out of future prompts, add an ignoredIssuePatterns entry with codes ["external-fetch-failed"] and a urlPattern matching that destination.',
                     'Avoid changing working third-party URLs solely because their server rejects HEAD requests.'
+                ];
+            case 'asset-redirect':
+                return [
+                    'These asset URLs returned redirect responses to HEAD checks.',
+                    'Update the source tag, CSS, JavaScript, or data value to point directly at the final stable asset URL when the redirect is not intentional.',
+                    'If the redirect is expected, suppress only that asset destination with an ignoredIssuePatterns entry using codes ["asset-redirect"].'
+                ];
+            case 'asset-error':
+                return [
+                    `These asset URLs returned ${status}error responses to HEAD checks.`,
+                    'Update or remove the referenced asset URL, restore the missing asset, or fix the server route that should serve it.',
+                    'Use the source context and snippet to patch the generating template, CSS, JavaScript, CMS field, or data source.'
+                ];
+            case 'asset-http-upgrade-available':
+                return [
+                    'These HTTP asset URLs failed, but the same URL works over HTTPS.',
+                    'Replace the source HTTP reference with the HTTPS URL shown in the To field.',
+                    'Prefer HTTPS or root-relative asset generation on HTTPS sites.'
+                ];
+            case 'asset-dns-temporary-failure':
+                return [
+                    'The crawler could not verify these asset URLs because DNS lookup returned EAI_AGAIN.',
+                    'Verify the asset URL from the target project environment before changing markup.',
+                    'If the destination is expected to fail in this crawler environment, suppress only that finding with an ignoredIssuePatterns entry using codes ["asset-dns-temporary-failure"].'
+                ];
+            case 'asset-fetch-failed':
+                return [
+                    'These asset URLs did not respond to a HEAD request.',
+                    'Verify the asset in a browser or with curl, then update or remove dead references.',
+                    'Avoid downloading large media just to verify this report; fix the source reference or server availability.'
+                ];
+            case 'asset-bot-protection':
+                return [
+                    'These asset URLs returned bot protection or edge security responses to crawler checks.',
+                    'Verify browser accessibility before changing content; these notices often mean automated HEAD checks were rejected.',
+                    'To keep expected protected assets out of notice output, add an ignoredIssuePatterns entry with codes ["asset-bot-protection"] and a matching urlPattern.'
+                ];
+            case 'insecure-asset-url':
+                return [
+                    'These asset references use HTTP or protocol-relative URLs during an HTTPS crawl.',
+                    'Replace them with HTTPS URLs or root-relative paths from the source tag, CSS, JavaScript, CMS field, or data value.',
+                    'Check shared asset base URL configuration if many assets share the same insecure host.'
+                ];
+            case 'iframe-missing-sandbox':
+                return [
+                    'These iframe embeds do not declare a sandbox policy.',
+                    'Add the narrowest intentional sandbox attribute that preserves the embed behavior, or document and suppress the finding if the provider cannot support it.',
+                    'Avoid granting broad permissions unless the embed requires them.'
+                ];
+            case 'iframe-missing-referrerpolicy':
+                return [
+                    'These iframe embeds do not declare a referrerpolicy.',
+                    'Add an intentional referrerpolicy value that matches privacy and analytics requirements.',
+                    'Common choices are no-referrer, strict-origin, or strict-origin-when-cross-origin depending on project policy.'
+                ];
+            case 'malformed-asset-url':
+                return [
+                    'These asset URL values could not be parsed safely.',
+                    'Fix invalid percent encoding, bad URL syntax, or malformed template/CSS/JS output in the listed source context.',
+                    'Do not leave malformed asset references in place even if one browser appears to recover from them.'
+                ];
+            case 'unsupported-asset-protocol':
+                return [
+                    'These asset references use protocols that this checker cannot safely verify as web assets.',
+                    'Replace file:, javascript:, vbscript:, or other unsupported protocols with normal HTTP(S) asset URLs when the reference is meant to load a resource.',
+                    'If the value is generated behavior rather than a fetchable asset, remove it from asset-loading markup or suppress the specific intentional finding.'
                 ];
             case 'missing-canonical':
                 return [
@@ -1478,11 +1629,17 @@ export default class LinkIssues extends BaseJob {
                 ...this.getCanonicalDetailLines(issue)
             ];
         }
+        if(typeof issue.assetKind === 'string') {
+            details.push(`Asset kind: ${issue.assetKind}`);
+        }
+        if(typeof issue.sourceLabel === 'string') {
+            details.push(`Source context: ${issue.sourceLabel}`);
+        }
         if(typeof issue.rawHref === 'string') {
             details.push(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`);
         }
         if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
-            details.push(`Anchor HTML: ${issue.htmlSnippet}`);
+            details.push(`${this.isAssetIssue(issue) ? 'Source snippet' : 'Anchor HTML'}: ${issue.htmlSnippet}`);
         }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             details.push(`Normalized: ${issue.normalizedUrl}`);
@@ -1575,6 +1732,7 @@ export default class LinkIssues extends BaseJob {
         const entries = new Map<string, ReportIssueEntry>();
         issues.forEach(issue => {
             const key = this.getReportKey(issue);
+            const occurrenceDetails = this.getIssueOccurrenceDetails(issue);
             let entry = entries.get(key);
             if(typeof entry === 'undefined') {
                 entry = {
@@ -1585,9 +1743,11 @@ export default class LinkIssues extends BaseJob {
                 };
                 entries.set(key, entry);
             }
-            entry.count++;
-            if(typeof issue.sourceUrl === 'string') {
-                entry.sourceUrls.add(issue.sourceUrl);
+            if(occurrenceDetails.length > 0) {
+                entry.count += occurrenceDetails.length;
+                occurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
+            } else {
+                entry.count++;
             }
         });
 
@@ -1613,6 +1773,20 @@ export default class LinkIssues extends BaseJob {
         });
     }
 
+    private getIssueOccurrenceDetails(issue: LinkIssue): LinkOccurrence[] {
+        if(typeof issue.occurrenceDetails !== 'undefined' && issue.occurrenceDetails.length > 0) {
+            return issue.occurrenceDetails;
+        }
+        if(typeof issue.sourceUrl === 'string') {
+            return [{
+                referer: issue.sourceUrl,
+                zone: issue.zone ?? 'unknown'
+            }];
+        }
+
+        return [];
+    }
+
     private getGroupSort(group: string): number {
         const index = reportGroupOrder.indexOf(group);
         return index === -1 ? reportGroupOrder.length : index;
@@ -1627,6 +1801,15 @@ export default class LinkIssues extends BaseJob {
         }
         if(issue.code === 'external-bot-protection') {
             return 'External Bot Protection';
+        }
+        if(issue.code === 'asset-dns-temporary-failure') {
+            return 'Temporary Asset DNS Failure';
+        }
+        if(issue.code === 'asset-fetch-failed') {
+            return 'Asset Fetch Failed';
+        }
+        if(issue.code === 'asset-bot-protection') {
+            return 'Asset Bot Protection';
         }
         if(issue.code === 'fetch-failed') {
             return 'Fetch Failed';
@@ -1651,6 +1834,10 @@ export default class LinkIssues extends BaseJob {
             'external-redirect',
             'external-dns-temporary-failure',
             'external-fetch-failed',
+            'asset-error',
+            'asset-redirect',
+            'asset-dns-temporary-failure',
+            'asset-fetch-failed',
             'fetch-failed'
         ].indexOf(issue.code) !== -1;
     }
@@ -1666,8 +1853,14 @@ export default class LinkIssues extends BaseJob {
         return [
             'external-dns-temporary-failure',
             'external-fetch-failed',
+            'asset-dns-temporary-failure',
+            'asset-fetch-failed',
             'fetch-failed'
         ].indexOf(issue.code) !== -1;
+    }
+
+    private isAssetIssue(issue: LinkIssue): boolean {
+        return issue.group === 'Asset Links' || issue.group === 'Asset Security';
     }
 
     private isCanonicalIssue(issue: LinkIssue): boolean {
@@ -1752,11 +1945,17 @@ export default class LinkIssues extends BaseJob {
             });
             return;
         }
+        if(typeof issue.assetKind === 'string') {
+            this.reportLine(`Asset kind: ${issue.assetKind}`, theme, 4);
+        }
+        if(typeof issue.sourceLabel === 'string') {
+            this.reportLine(`Source context: ${issue.sourceLabel}`, theme, 4);
+        }
         if(typeof issue.rawHref === 'string') {
             this.reportLine(`Raw href: ${issue.rawHref === '' ? '[empty]' : issue.rawHref}`, theme, 4);
         }
         if(typeof issue.htmlSnippet === 'string' && issue.htmlSnippet !== '') {
-            this.reportLine(`Anchor HTML: ${issue.htmlSnippet}`, theme, 4);
+            this.reportLine(`${this.isAssetIssue(issue) ? 'Source snippet' : 'Anchor HTML'}: ${issue.htmlSnippet}`, theme, 4);
         }
         if(typeof issue.normalizedUrl === 'string' && issue.normalizedUrl !== issue.targetUrl) {
             this.reportLine(`Normalized: ${issue.normalizedUrl}`, theme, 4);
@@ -1884,6 +2083,748 @@ export default class LinkIssues extends BaseJob {
             this.auditFragment(link, pageData);
             this.trackExternalLink(link);
         });
+    }
+
+    private collectPageAssets(pageData: PageData): void {
+        if(!this.includeAssets || typeof pageData.jsdom === 'undefined') {
+            return;
+        }
+
+        const document = pageData.jsdom;
+        const pageUrl = pageData.location.url;
+        const collectAttribute = (selector: string, attribute: string, kind: AssetKind): void => {
+            document.querySelectorAll(selector).forEach(element => {
+                this.addAssetFromElement(element, attribute, kind, pageUrl);
+            });
+        };
+
+        collectAttribute('script[src]', 'src', 'script');
+        collectAttribute('link[href]', 'href', 'preload');
+        collectAttribute('img[src]', 'src', 'image');
+        collectAttribute('input[type="image"][src]', 'src', 'image');
+        collectAttribute('source[src]', 'src', 'media');
+        collectAttribute('video[src], audio[src]', 'src', 'media');
+        collectAttribute('track[src]', 'src', 'track');
+        collectAttribute('video[poster]', 'poster', 'poster');
+        collectAttribute('embed[src]', 'src', 'embed');
+        collectAttribute('object[data]', 'data', 'object');
+        collectAttribute('svg image[href]', 'href', 'svg');
+        collectAttribute('svg image[xlink\\:href]', 'xlink:href', 'svg');
+
+        document.querySelectorAll('iframe[src]').forEach(element => {
+            const targetUrl = this.addAssetFromElement(element, 'src', 'iframe', pageUrl);
+            this.auditIframeSecurity(element, pageUrl, targetUrl);
+        });
+
+        document.querySelectorAll('img[srcset], source[srcset]').forEach(element => {
+            const sourceLabel = `${this.getElementLabel(element)} srcset`;
+            this.parseSrcset(element.getAttribute('srcset') ?? '').forEach(candidate => {
+                this.addAssetReference(candidate, {
+                    sourceUrl: pageUrl,
+                    baseUrl: pageUrl,
+                    sourceLabel,
+                    kind: 'srcset',
+                    htmlSnippet: this.getElementSnippet(element),
+                    zone: this.classifyAssetZone(element)
+                });
+            });
+        });
+
+        document.querySelectorAll('meta[content]').forEach(element => {
+            const name = String(element.getAttribute('property') ?? element.getAttribute('name') ?? '').toLowerCase();
+            if(!this.isAssetMetaName(name)) {
+                return;
+            }
+            this.addAssetReference(element.getAttribute('content') ?? '', {
+                sourceUrl: pageUrl,
+                baseUrl: pageUrl,
+                sourceLabel: `${this.getElementLabel(element)} content`,
+                kind: 'meta',
+                htmlSnippet: this.getElementSnippet(element),
+                zone: 'unknown'
+            });
+        });
+
+        document.querySelectorAll('style').forEach(element => {
+            this.collectCssAssetReferences(String(element.textContent ?? ''), {
+                sourceUrl: pageUrl,
+                baseUrl: pageUrl,
+                sourceLabel: 'inline <style>',
+                kind: 'inline-style',
+                htmlSnippet: this.getElementSnippet(element),
+                zone: this.classifyAssetZone(element)
+            });
+        });
+
+        document.querySelectorAll('[style]').forEach(element => {
+            this.collectCssAssetReferences(element.getAttribute('style') ?? '', {
+                sourceUrl: pageUrl,
+                baseUrl: pageUrl,
+                sourceLabel: `${this.getElementLabel(element)} style attribute`,
+                kind: 'inline-style',
+                htmlSnippet: this.getElementSnippet(element),
+                zone: this.classifyAssetZone(element)
+            });
+        });
+    }
+
+    private addAssetFromElement(element: Element, attribute: string, fallbackKind: AssetKind, pageUrl: string): string|null {
+        const kind = element.tagName.toLowerCase() === 'link'
+            ? this.getLinkAssetKind(element) ?? fallbackKind
+            : fallbackKind;
+        if(kind === 'preload' && element.tagName.toLowerCase() === 'link'
+            && this.getLinkAssetKind(element) === null) {
+            return null;
+        }
+
+        return this.addAssetReference(element.getAttribute(attribute) ?? '', {
+            sourceUrl: pageUrl,
+            baseUrl: pageUrl,
+            sourceLabel: `${this.getElementLabel(element)} ${attribute}`,
+            kind,
+            htmlSnippet: this.getElementSnippet(element),
+            zone: this.classifyAssetZone(element)
+        });
+    }
+
+    private getLinkAssetKind(element: Element): AssetKind|null {
+        const rel = String(element.getAttribute('rel') ?? '').toLowerCase().split(/\s+/);
+        if(rel.includes('canonical') || rel.includes('alternate')) {
+            return null;
+        }
+        if(rel.includes('stylesheet')) {
+            return 'stylesheet';
+        }
+        if(rel.includes('manifest')) {
+            return 'manifest';
+        }
+        if(rel.some(value => ['icon', 'apple-touch-icon', 'mask-icon', 'shortcut'].includes(value))) {
+            return 'icon';
+        }
+        if(rel.some(value => ['preload', 'modulepreload', 'prefetch'].includes(value))) {
+            return 'preload';
+        }
+        return null;
+    }
+
+    private addAssetReference(rawUrl: string, context: AssetReferenceContext): string|null {
+        const trimmedUrl = rawUrl.trim().replace(/^['"]|['"]$/g, '').trim();
+        if(trimmedUrl === '' || trimmedUrl.startsWith('#') || /^(data|blob|about):/i.test(trimmedUrl)) {
+            return null;
+        }
+
+        let parsedUrl: URL;
+        try {
+            parsedUrl = new URL(trimmedUrl, context.baseUrl);
+        } catch (e) {
+            this.addAssetContextIssue(
+                context,
+                'error',
+                'malformed-asset-url',
+                e instanceof Error ? e.message : String(e),
+                trimmedUrl
+            );
+            return null;
+        }
+
+        if(parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+            this.addAssetContextIssue(
+                context,
+                'warning',
+                'unsupported-asset-protocol',
+                'Asset reference uses an unsupported protocol.',
+                trimmedUrl,
+                parsedUrl.href
+            );
+            return null;
+        }
+
+        const targetUrl = parsedUrl.href;
+        if(this.isInsecureAssetReference(trimmedUrl, parsedUrl)) {
+            this.addAssetContextIssue(
+                context,
+                'warning',
+                'insecure-asset-url',
+                'Asset reference uses HTTP or a protocol-relative URL on an HTTPS crawl.',
+                trimmedUrl,
+                targetUrl
+            );
+        }
+
+        const isExternal = this.normalizeHostname(parsedUrl.hostname) !== this.baseHostname;
+        if(isExternal && !this.includeExternal) {
+            return targetUrl;
+        }
+
+        const key = [
+            targetUrl,
+            trimmedUrl,
+            context.kind,
+            context.sourceLabel
+        ].join('|');
+        const occurrence: LinkOccurrence = {
+            referer: context.sourceUrl,
+            zone: context.zone
+        };
+        const occurrences = context.occurrenceDetails ?? [occurrence];
+        const existingAsset = this.assetLinks.get(key);
+        if(typeof existingAsset !== 'undefined') {
+            existingAsset.occurrences.push(...occurrences);
+            return targetUrl;
+        }
+
+        this.assetLinks.set(key, {
+            targetUrl,
+            rawUrl: trimmedUrl,
+            sourceUrl: context.sourceUrl,
+            sourceLabel: context.sourceLabel,
+            kind: context.kind,
+            htmlSnippet: context.htmlSnippet,
+            zone: context.zone,
+            isExternal,
+            occurrences
+        });
+
+        return targetUrl;
+    }
+
+    private addAssetContextIssue(
+        context: AssetReferenceContext,
+        severity: LinkIssueSeverity,
+        code: string,
+        message: string,
+        rawUrl: string,
+        targetUrl?: string
+    ): void {
+        this.addIssue({
+            severity,
+            group: 'Asset Security',
+            code,
+            message,
+            targetUrl,
+            sourceUrl: context.sourceUrl,
+            rawHref: rawUrl,
+            htmlSnippet: context.htmlSnippet,
+            normalizedUrl: targetUrl,
+            zone: context.zone,
+            assetKind: context.kind,
+            sourceLabel: context.sourceLabel,
+            occurrenceDetails: context.occurrenceDetails
+        });
+    }
+
+    private auditIframeSecurity(element: Element, pageUrl: string, targetUrl: string|null): void {
+        const context: AssetReferenceContext = {
+            sourceUrl: pageUrl,
+            baseUrl: pageUrl,
+            sourceLabel: `${this.getElementLabel(element)} src`,
+            kind: 'iframe',
+            htmlSnippet: this.getElementSnippet(element),
+            zone: this.classifyAssetZone(element)
+        };
+        const rawUrl = element.getAttribute('src') ?? '';
+        if(!element.hasAttribute('sandbox')) {
+            this.addAssetContextIssue(
+                context,
+                'warning',
+                'iframe-missing-sandbox',
+                'Iframe embed is missing a sandbox attribute.',
+                rawUrl,
+                targetUrl ?? undefined
+            );
+        }
+        if(!element.hasAttribute('referrerpolicy')) {
+            this.addAssetContextIssue(
+                context,
+                'warning',
+                'iframe-missing-referrerpolicy',
+                'Iframe embed is missing a referrerpolicy attribute.',
+                rawUrl,
+                targetUrl ?? undefined
+            );
+        }
+    }
+
+    private async auditAssetLinks(): Promise<void> {
+        if(!this.includeAssets) {
+            return;
+        }
+
+        const config = this.getAssetRequestConfig();
+        let assets = Array.from(this.assetLinks.values());
+        this.profiler.markJob(this.handle, 'shutdown',
+            `asset link audit starting (${assets.length} unique URL/source pairs, ${Math.min(externalCheckConcurrency, assets.length)} workers)`
+        );
+        let index = 0;
+        let completed = 0;
+        const workers = Array.from({length: Math.min(externalCheckConcurrency, assets.length)}, async () => {
+            while(!this.runtime.aborted) {
+                if(index >= assets.length) {
+                    if(assets.length >= this.assetLinks.size) {
+                        break;
+                    }
+                    assets = Array.from(this.assetLinks.values());
+                    this.profiler.markJob(this.handle, 'shutdown',
+                        `asset link audit queue expanded (${assets.length} unique URL/source pairs after nested CSS/JS discovery)`
+                    );
+                }
+                const asset = assets[index++];
+                const startedAt = Date.now();
+                await this.auditAssetLinkWithTimeout(asset, config);
+                const elapsedMs = Date.now() - startedAt;
+                completed++;
+                if(elapsedMs >= 1000 || completed % 25 === 0 || completed === assets.length) {
+                    this.profiler.markJob(this.handle, 'shutdown',
+                        `asset link checked ${completed}/${this.assetLinks.size} in ${(elapsedMs / 1000).toFixed(2)}s: ${asset.targetUrl}`
+                    );
+                }
+            }
+        });
+        await Promise.all(workers);
+        this.profiler.markJob(this.handle, 'shutdown',
+            `asset link audit finished (${completed}/${this.assetLinks.size} checked, ${this.scannedAssetBodies.size} CSS/JS bodies scanned)`
+        );
+    }
+
+    private async auditAssetLinkWithTimeout(asset: AssetRecord, config: AxiosRequestConfig): Promise<void> {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+            controller.abort(`Asset link audit exceeded ${(externalCheckUrlTimeoutMs / 1000).toFixed(1)}s URL budget.`);
+        }, externalCheckUrlTimeoutMs);
+
+        try {
+            const signals = [controller.signal];
+            if(typeof config.signal !== 'undefined') {
+                signals.push(config.signal as AbortSignal);
+            }
+            await this.auditAssetLink(asset, {
+                ...config,
+                signal: AbortSignal.any(signals)
+            });
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    private async auditAssetLink(asset: AssetRecord, config: AxiosRequestConfig): Promise<void> {
+        if(this.runtime.aborted) {
+            return;
+        }
+
+        try {
+            const response = await this.externalHead(asset.targetUrl, config);
+            if(this.isBotProtectionResponse(response)) {
+                this.addAssetBotProtectionNotice(asset, response.status);
+                return;
+            }
+            await this.scanAssetBodyIfNeeded(asset, response, config);
+        } catch (e) {
+            if(this.runtime.aborted) {
+                return;
+            }
+
+            if(axios.isAxiosError(e) && typeof e.response !== 'undefined') {
+                if(this.isBotProtectionResponse(e.response)) {
+                    this.addAssetBotProtectionNotice(asset, e.response.status);
+                    return;
+                }
+
+                const status = e.response.status;
+                if(status >= 300 && status < 400) {
+                    this.addAssetIssue(asset, 'warning', 'asset-redirect', 'Asset URL returned a redirect response.', status, String(e.response.headers.location ?? ''));
+                    return;
+                }
+                if(status >= 400) {
+                    const httpsUrl = await this.getReachableHttpsUpgradeUrlByHead(asset.targetUrl, config);
+                    if(httpsUrl !== null) {
+                        this.addAssetIssue(asset, 'error', 'asset-http-upgrade-available', 'Asset HTTP URL failed, but the HTTPS version responded successfully.', status, httpsUrl);
+                        return;
+                    }
+                    if(await this.assetGetShowsReachableOrProtected(asset, config)) {
+                        return;
+                    }
+                    this.addAssetIssue(asset, 'error', 'asset-error', 'Asset URL returned an error response.', status);
+                }
+                return;
+            }
+
+            if(this.isTemporaryDnsFailure(e)) {
+                this.addAssetIssue(asset, 'warning', 'asset-dns-temporary-failure', 'Asset URL DNS lookup failed with EAI_AGAIN.', 0, undefined, 'EAI_AGAIN', e instanceof Error ? e.message : String(e));
+                return;
+            }
+
+            const httpsUrl = await this.getReachableHttpsUpgradeUrlByHead(asset.targetUrl, config);
+            if(httpsUrl !== null) {
+                this.addAssetIssue(asset, 'error', 'asset-http-upgrade-available', 'Asset HTTP URL failed, but the HTTPS version responded successfully.', 0, httpsUrl);
+                return;
+            }
+
+            if(await this.assetGetShowsReachableOrProtected(asset, config)) {
+                return;
+            }
+
+            this.addAssetIssue(asset, 'warning', 'asset-fetch-failed', 'Asset URL did not respond to a HEAD request.', 0);
+        }
+    }
+
+    private async assetGetShowsReachableOrProtected(asset: AssetRecord, config: AxiosRequestConfig): Promise<boolean> {
+        if(!this.shouldUseAssetGetFallback(asset)) {
+            return false;
+        }
+
+        return await this.externalGetShowsReachableOrProtected(asset.targetUrl, {
+            ...this.getExternalFallbackConfig(config),
+            maxContentLength: assetBodyMaxBytes,
+            maxBodyLength: assetBodyMaxBytes
+        });
+    }
+
+    private shouldUseAssetGetFallback(asset: AssetRecord): boolean {
+        if(!asset.isExternal) {
+            return false;
+        }
+
+        return [
+            'script',
+            'stylesheet',
+            'manifest',
+            'css-url',
+            'css-import',
+            'css-source-map',
+            'js-url',
+            'js-source-map'
+        ].includes(asset.kind);
+    }
+
+    private addAssetIssue(
+        asset: AssetRecord,
+        severity: LinkIssueSeverity,
+        code: string,
+        message: string,
+        statusCode?: number,
+        finalUrl?: string,
+        networkErrorCode?: string,
+        networkErrorMessage?: string
+    ): void {
+        this.addIssue({
+            severity,
+            group: 'Asset Links',
+            code,
+            message,
+            targetUrl: asset.targetUrl,
+            sourceUrl: asset.sourceUrl,
+            rawHref: asset.rawUrl,
+            htmlSnippet: asset.htmlSnippet,
+            normalizedUrl: asset.targetUrl,
+            statusCode,
+            finalUrl,
+            networkErrorCode,
+            networkErrorMessage,
+            zone: asset.zone,
+            assetKind: asset.kind,
+            sourceLabel: asset.sourceLabel,
+            occurrenceDetails: asset.occurrences
+        });
+    }
+
+    private addAssetBotProtectionNotice(asset: AssetRecord, statusCode?: number): void {
+        this.addAssetIssue(
+            asset,
+            'notice',
+            'asset-bot-protection',
+            'Asset URL returned a bot protection or edge security response.',
+            statusCode
+        );
+    }
+
+    private getAssetRequestConfig(): AxiosRequestConfig {
+        return {
+            maxRedirects: 0,
+            timeout: externalCheckTimeoutMs,
+            headers: {
+                ...externalCheckRequestHeaders
+            },
+            httpAgent: new http.Agent({
+                timeout: externalCheckTimeoutMs
+            }),
+            httpsAgent: new https.Agent({
+                timeout: externalCheckTimeoutMs,
+                requestCert: false,
+                rejectUnauthorized: this.config.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
+            }),
+            signal: this.runtime.abortSignal
+        };
+    }
+
+    private async scanAssetBodyIfNeeded(asset: AssetRecord, response: AxiosResponse<unknown>, config: AxiosRequestConfig): Promise<void> {
+        if(asset.isExternal || this.scannedAssetBodies.has(asset.targetUrl)) {
+            return;
+        }
+        if(!this.shouldScanAssetBody(asset, response)) {
+            return;
+        }
+
+        this.scannedAssetBodies.add(asset.targetUrl);
+        const scanKind = this.isCssAsset(asset, response) ? 'CSS' : 'JS';
+        const startedAt = Date.now();
+        const initialAssetCount = this.assetLinks.size;
+        this.profiler.markJob(this.handle, 'shutdown',
+            `asset ${scanKind} body scan starting: ${asset.targetUrl}`
+        );
+        try {
+            const bodyResponse = await this.externalGet(asset.targetUrl, {
+                ...config,
+                maxContentLength: assetBodyMaxBytes,
+                maxBodyLength: assetBodyMaxBytes
+            }, false);
+            const body = bodyResponse.data;
+            const baseContext: AssetReferenceContext = {
+                sourceUrl: asset.sourceUrl,
+                baseUrl: asset.targetUrl,
+                sourceLabel: asset.sourceLabel,
+                kind: asset.kind,
+                htmlSnippet: asset.htmlSnippet,
+                zone: asset.zone,
+                occurrenceDetails: asset.occurrences
+            };
+
+            if(this.isCssAsset(asset, bodyResponse)) {
+                this.collectCssAssetReferences(body, {
+                    ...baseContext,
+                    sourceLabel: `CSS body ${asset.targetUrl}`,
+                    kind: 'css-url'
+                });
+            } else if(this.isJsAsset(asset, bodyResponse)) {
+                this.collectJsAssetReferences(body, {
+                    ...baseContext,
+                    sourceLabel: `JS body ${asset.targetUrl}`,
+                    kind: 'js-url'
+                });
+            }
+            const elapsedMs = Date.now() - startedAt;
+            const discovered = this.assetLinks.size - initialAssetCount;
+            this.profiler.markJob(this.handle, 'shutdown',
+                `asset ${scanKind} body scan complete in ${(elapsedMs / 1000).toFixed(2)}s; discovered ${discovered} nested asset URL(s): ${asset.targetUrl}`
+            );
+        } catch {
+            // HEAD already proved the asset reachable; body scanning is best-effort so large
+            // or blocked CSS/JS bodies do not become false broken-asset findings.
+            const elapsedMs = Date.now() - startedAt;
+            this.profiler.markJob(this.handle, 'shutdown',
+                `asset ${scanKind} body scan skipped after ${(elapsedMs / 1000).toFixed(2)}s: ${asset.targetUrl}`
+            );
+        }
+    }
+
+    private shouldScanAssetBody(asset: AssetRecord, response: AxiosResponse<unknown>): boolean {
+        return this.isCssAsset(asset, response) || this.isJsAsset(asset, response);
+    }
+
+    private isCssAsset(asset: AssetRecord, response: AxiosResponse<unknown>): boolean {
+        const contentType = this.getContentType(response);
+        return contentType.includes('text/css') || new URL(asset.targetUrl).pathname.toLowerCase().endsWith('.css');
+    }
+
+    private isJsAsset(asset: AssetRecord, response: AxiosResponse<unknown>): boolean {
+        const contentType = this.getContentType(response);
+        const path = new URL(asset.targetUrl).pathname.toLowerCase();
+        return contentType.includes('javascript')
+            || contentType.includes('ecmascript')
+            || path.endsWith('.js')
+            || path.endsWith('.mjs');
+    }
+
+    private getContentType(response: AxiosResponse<unknown>): string {
+        const header: unknown = response.headers['content-type'] ?? '';
+        return (Array.isArray(header) ? header.join(' ') : String(header)).toLowerCase();
+    }
+
+    private collectCssAssetReferences(css: string, context: AssetReferenceContext): void {
+        const urlPattern = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^)'"]+))\s*\)/gi;
+        let match: RegExpExecArray|null;
+        while((match = urlPattern.exec(css)) !== null) {
+            const rawUrl = match[1] ?? match[2] ?? match[3] ?? '';
+            this.addAssetReference(rawUrl, {
+                ...context,
+                kind: 'css-url',
+                sourceLabel: `${context.sourceLabel} url()`,
+                htmlSnippet: this.getTextSnippet(css, match.index)
+            });
+        }
+
+        const importPattern = /@import\s+(?:url\(\s*)?(?:"([^"]*)"|'([^']*)'|([^\s;)]+))/gi;
+        while((match = importPattern.exec(css)) !== null) {
+            const rawUrl = match[1] ?? match[2] ?? match[3] ?? '';
+            this.addAssetReference(rawUrl, {
+                ...context,
+                kind: 'css-import',
+                sourceLabel: `${context.sourceLabel} @import`,
+                htmlSnippet: this.getTextSnippet(css, match.index)
+            });
+        }
+
+        this.collectSourceMapReferences(css, context, 'css-source-map');
+    }
+
+    private collectJsAssetReferences(js: string, context: AssetReferenceContext): void {
+        const assetStringPattern = /(['"`])([^'"`]{1,2048}\.(?:png|jpe?g|gif|webp|avif|svg|css|js|mjs|woff2?|ttf|otf|eot|ico|json|webmanifest|mp4|webm|mp3|wav|pdf)(?:[?#][^'"`]*)?)\1/gi;
+        let match: RegExpExecArray|null;
+        while((match = assetStringPattern.exec(js)) !== null) {
+            const rawUrl = match[2] ?? '';
+            if(!this.isConservativeJsAssetReference(rawUrl)) {
+                continue;
+            }
+            this.addAssetReference(rawUrl, {
+                ...context,
+                kind: 'js-url',
+                sourceLabel: `${context.sourceLabel} string literal`,
+                htmlSnippet: this.getTextSnippet(js, match.index)
+            });
+        }
+
+        this.collectSourceMapReferences(js, context, 'js-source-map');
+    }
+
+    private collectSourceMapReferences(body: string, context: AssetReferenceContext, kind: 'css-source-map'|'js-source-map'): void {
+        const sourceMapPattern = /[#@]\s*sourceMappingURL=([^\s*]+)/gi;
+        let match: RegExpExecArray|null;
+        while((match = sourceMapPattern.exec(body)) !== null) {
+            this.addAssetReference(match[1] ?? '', {
+                ...context,
+                kind,
+                sourceLabel: `${context.sourceLabel} sourceMappingURL`,
+                htmlSnippet: this.getTextSnippet(body, match.index)
+            });
+        }
+    }
+
+    private isConservativeJsAssetReference(rawUrl: string): boolean {
+        if(/^(https?:)?\/\//i.test(rawUrl) || rawUrl.startsWith('/')) {
+            return true;
+        }
+        if(rawUrl.startsWith('./') || rawUrl.startsWith('../')) {
+            return !this.isRelativeJsModuleSpecifier(rawUrl);
+        }
+
+        return false;
+    }
+
+    private isRelativeJsModuleSpecifier(rawUrl: string): boolean {
+        try {
+            const path = new URL(rawUrl, 'https://example.invalid/').pathname.toLowerCase();
+            return path.endsWith('.js') || path.endsWith('.mjs');
+        } catch {
+            return false;
+        }
+    }
+
+    private parseSrcset(value: string): string[] {
+        return value
+            .split(',')
+            .map(candidate => candidate.trim().split(/\s+/)[0] ?? '')
+            .filter(candidate => candidate !== '');
+    }
+
+    private isAssetMetaName(name: string): boolean {
+        return [
+            'og:image',
+            'og:image:url',
+            'og:video',
+            'og:video:url',
+            'twitter:image',
+            'twitter:image:src',
+            'twitter:player',
+            'msapplication-tileimage'
+        ].includes(name);
+    }
+
+    private isInsecureAssetReference(rawUrl: string, parsedUrl: URL): boolean {
+        return this.baseProtocol === 'https:'
+            && (parsedUrl.protocol === 'http:' || rawUrl.startsWith('//'));
+    }
+
+    private async getReachableHttpsUpgradeUrlByHead(url: string, config: AxiosRequestConfig): Promise<string|null> {
+        if(this.runtime.aborted) {
+            return null;
+        }
+
+        const httpsUrl = this.getHttpsUpgradeUrl(url);
+        if(httpsUrl === null) {
+            return null;
+        }
+
+        try {
+            const response = await this.externalHead(httpsUrl, this.getExternalFallbackConfig(config), false);
+            if(response.status >= 200 && response.status < 300) {
+                return httpsUrl;
+            }
+        } catch (e) {
+            if(this.runtime.aborted || this.isAbortError(e)) {
+                return null;
+            }
+            if(axios.isAxiosError(e)
+                && typeof e.response !== 'undefined'
+                && e.response.status >= 200
+                && e.response.status < 400) {
+                return httpsUrl;
+            }
+        }
+
+        return null;
+    }
+
+    private getElementLabel(element: Element): string {
+        const tag = element.tagName.toLowerCase();
+        const id = element.getAttribute('id');
+        const className = String(element.getAttribute('class') ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 3);
+        return `${tag}${id !== null && id !== '' ? `#${id}` : ''}${className.length > 0 ? `.${className.join('.')}` : ''}`;
+    }
+
+    private getElementSnippet(element: Element): string {
+        return this.truncateText(element.outerHTML.trim(), 320);
+    }
+
+    private getTextSnippet(value: string, index: number): string {
+        const start = Math.max(0, index - 80);
+        const end = Math.min(value.length, index + 180);
+        return this.truncateText(value.slice(start, end).replace(/\s+/g, ' ').trim(), 320);
+    }
+
+    private truncateText(value: string, maxBytes: number): string {
+        if(Buffer.byteLength(value, 'utf8') <= maxBytes) {
+            return value;
+        }
+
+        let bytes = 0;
+        let output = '';
+        for(const character of value) {
+            const characterBytes = Buffer.byteLength(character, 'utf8');
+            if(bytes + characterBytes > maxBytes - 3) {
+                return `${output}...`;
+            }
+            bytes += characterBytes;
+            output += character;
+        }
+        return output;
+    }
+
+    private classifyAssetZone(element: Element): LinkZone {
+        if(element.closest('nav') !== null) {
+            return 'nav';
+        }
+        if(element.closest('header') !== null) {
+            return 'header';
+        }
+        if(element.closest('footer') !== null) {
+            return 'footer';
+        }
+        if(element.closest('aside') !== null) {
+            return 'aside';
+        }
+        if(element.closest('main') !== null) {
+            return 'main';
+        }
+        return 'unknown';
     }
 
     private compileUndesirablePathCharacterPattern(pattern: string): RegExp {

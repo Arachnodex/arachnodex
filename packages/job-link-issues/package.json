@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/job-link-issues",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Arachnodex job for reporting crawl link issues.",
   "type": "module",
   "main": "bin/index.js",
@@ -50,10 +50,10 @@
     "axios": "^1.12.2"
   },
   "peerDependencies": {
-    "@arachnodex/core": "^1.0.6"
+    "@arachnodex/core": "^1.0.7"
   },
   "devDependencies": {
-    "@arachnodex/core": "^1.0.6",
+    "@arachnodex/core": "^1.0.7",
     "@types/node": "^22",
     "esbuild": "^0.25.0",
     "typescript": "^5.6.3"
