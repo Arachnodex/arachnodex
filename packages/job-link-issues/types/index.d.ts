@@ -201,6 +201,7 @@ export default class LinkIssues extends BaseJob {
     private collectJsAssetReferences;
     private collectSourceMapReferences;
     private isConservativeJsAssetReference;
+    private isStandaloneJsStringLiteral;
     private isRelativeJsModuleSpecifier;
     private parseSrcset;
     private isAssetMetaName;

@@ -2671,7 +2671,10 @@ export default class LinkIssues extends BaseJob {
         let match: RegExpExecArray|null;
         while((match = assetStringPattern.exec(js)) !== null) {
             const rawUrl = match[2] ?? '';
-            if(!this.isConservativeJsAssetReference(rawUrl)) {
+            if(
+                !this.isConservativeJsAssetReference(rawUrl)
+                || !this.isStandaloneJsStringLiteral(js, match.index, match[0].length)
+            ) {
                 continue;
             }
             this.addAssetReference(rawUrl, {
@@ -2699,6 +2702,9 @@ export default class LinkIssues extends BaseJob {
     }
 
     private isConservativeJsAssetReference(rawUrl: string): boolean {
+        if(rawUrl.includes('${')) {
+            return false;
+        }
         if(/^(https?:)?\/\//i.test(rawUrl) || rawUrl.startsWith('/')) {
             return true;
         }
@@ -2707,6 +2713,12 @@ export default class LinkIssues extends BaseJob {
         }
 
         return false;
+    }
+
+    private isStandaloneJsStringLiteral(js: string, startIndex: number, length: number): boolean {
+        const before = js.slice(0, startIndex).match(/\S\s*$/)?.[0].trim() ?? '';
+        const after = js.slice(startIndex + length).match(/^\s*\S/)?.[0].trim() ?? '';
+        return before !== '+' && after !== '+';
     }
 
     private isRelativeJsModuleSpecifier(rawUrl: string): boolean {
