@@ -218,6 +218,7 @@ export default class LinkIssues extends BaseJob {
     private compileSeveritySelector;
     private normalizeEmailReportTriggerLevels;
     private getDecodedUrlPath;
+    private getDecodedUrlPathFromUrl;
     private addPageLinkIssue;
     private isBlankTargetMissingRel;
     private isInsecureInternalLink;

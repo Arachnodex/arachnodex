@@ -1,0 +1,58 @@
+{
+  "emailReportEnabled": true,
+  "limitMail": true,
+  "verbose": false,
+  "nested": false,
+  "fingerprintPattern": "[A-Za-z0-9]{8,}",
+  "fingerprintSeparatorPattern": "\\.",
+  "ignorePatterns": [],
+  "qsProps": {
+    "cb": "^\\d{10,}$",
+    "t": "^\\d{10,}$",
+    "ts": "^\\d{10,}$",
+    "v": "^(?:\\d{8,}|[A-Za-z0-9._-]{8,})$",
+    "ver": "^(?:\\d{8,}|[A-Za-z0-9._-]{8,})$",
+    "version": "^(?:\\d{8,}|[A-Za-z0-9._-]{8,})$"
+  },
+  "assetExtensions": [
+    "css",
+    "js",
+    "mjs",
+    "woff",
+    "woff2",
+    "ttf",
+    "otf",
+    "eot",
+    "ico",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "webp",
+    "avif",
+    "svg",
+    "webmanifest",
+    "map"
+  ],
+  "mediaExtensions": [
+    "mp4",
+    "webm",
+    "mov",
+    "m4v",
+    "mp3",
+    "wav",
+    "ogg",
+    "vtt"
+  ],
+  "documentExtensions": [
+    "pdf",
+    "doc",
+    "docx",
+    "xls",
+    "xlsx",
+    "ppt",
+    "pptx",
+    "csv",
+    "zip"
+  ]
+}

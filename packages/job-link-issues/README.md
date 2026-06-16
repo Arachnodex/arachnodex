@@ -210,8 +210,10 @@ External asset availability is checked only when external checks are also
 enabled with `-e`. Those checks use HEAD only; external CSS and JavaScript
 bodies are never downloaded or parsed.
 
-Asset checks also report HTTPS-page references to HTTP or protocol-relative
-assets, plus iframe embeds missing `sandbox` or `referrerpolicy` attributes.
+Asset checks also report decoded asset URL paths that match
+`undesirablePathCharacterPattern`, HTTPS-page references to HTTP or
+protocol-relative assets, plus iframe embeds missing `sandbox` or
+`referrerpolicy` attributes.
 
 ## Switches
 

@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/core",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Arachnodex core crawler runtime, shared APIs, and CLI.",
   "main": "bin/index.js",
   "types": "types/index.d.ts",

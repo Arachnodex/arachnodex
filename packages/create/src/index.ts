@@ -10,8 +10,9 @@ type ScaffoldConfig = {
 }
 
 const packageDependencies = {
-    "@arachnodex/core": "^1.0.7",
-    "@arachnodex/job-link-issues": "^1.0.5",
+    "@arachnodex/core": "^1.0.8",
+    "@arachnodex/job-link-issues": "^1.0.7",
+    "@arachnodex/job-nfa-report": "^1.0.0",
     "@arachnodex/job-sitemap": "^1.0.1"
 };
 
@@ -30,6 +31,11 @@ const configFiles = [
         specifier: "@arachnodex/job-link-issues/config/link-issues.example.json",
         exampleFile: "link-issues.example.json",
         runtimeFile: "link-issues.json"
+    },
+    {
+        specifier: "@arachnodex/job-nfa-report/config/nfa-report.example.json",
+        exampleFile: "nfa-report.example.json",
+        runtimeFile: "nfa-report.json"
     },
     {
         specifier: "@arachnodex/job-sitemap/config/sitemap.example.json",
@@ -112,9 +118,9 @@ function writeProjectPackageJson(targetDir: string): void {
         type: "module",
         scripts: {
             crawl: "arachnodex",
-            "crawl:default": "arachnodex -c default -j sitemap -j link-issues",
+            "crawl:default": "arachnodex -c default -j sitemap -j link-issues -j nfa-report",
             "crawl:src": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts",
-            "crawl:src:default": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts -c default -j sitemap -j link-issues"
+            "crawl:src:default": "node --conditions=development --import tsx node_modules/@arachnodex/core/src/index.ts -c default -j sitemap -j link-issues -j nfa-report"
         },
         dependencies: packageDependencies,
         devDependencies: packageDevDependencies

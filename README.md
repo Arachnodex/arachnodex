@@ -2,7 +2,7 @@
 
 Arachnodex is a modular Node.js web crawler framework. It spiders a configured site, parses page data, and runs one or more installed jobs during the crawl.
 
-The create workflow installs the core crawler, a sitemap job, a link issue reporting job, and a small bot protection heuristics package that can be updated independently.
+The create workflow installs the core crawler, sitemap, link issue reporting, non-fingerprinted assets reporting, and a small bot protection heuristics package that can be updated independently.
 
 ## Requirements
 
@@ -47,8 +47,8 @@ You can also install the CLI globally:
 
 ```sh
 npm install -g @arachnodex/core
-npm install -g @arachnodex/job-sitemap @arachnodex/job-link-issues
-arachnodex -c default -j sitemap -j link-issues
+npm install -g @arachnodex/job-sitemap @arachnodex/job-link-issues @arachnodex/job-nfa-report
+arachnodex -c default -j sitemap -j link-issues -j nfa-report
 ```
 
 The global install works for the core CLI, but core does not include job packages. Install the jobs you want alongside it so shorthand names such as `sitemap` and `link-issues` can resolve.
@@ -67,7 +67,7 @@ npm exec -- arachnodex -c default -j sitemap
 
 `@arachnodex/core` provides the crawler runtime, shared APIs, and the `arachnodex` CLI. It does not bundle official jobs.
 
-Job handles such as `sitemap` and `link-issues` are shorthand import names. They resolve to `@arachnodex/job-sitemap` and `@arachnodex/job-link-issues`, but those packages must be installed in the current local project or in the same global environment as the CLI.
+Job handles such as `sitemap`, `link-issues`, and `nfa-report` are shorthand import names. They resolve to `@arachnodex/job-sitemap`, `@arachnodex/job-link-issues`, and `@arachnodex/job-nfa-report`, but those packages must be installed in the current local project or in the same global environment as the CLI.
 
 `npm create @arachnodex` installs the default official jobs for generated projects. Manual and global installs should add whichever official or third-party job packages they plan to run.
 
@@ -118,7 +118,7 @@ npm run crawl -- -c default -j sitemap
 Generated projects also include a source-mode runner for custom job development:
 
 ```sh
-npm run crawl:src -- -c default -j sitemap -j link-issues
+npm run crawl:src -- -c default -j sitemap -j link-issues -j nfa-report
 ```
 
 In this monorepo, use the root `crawl-dev` script for the same source-mode workflow:
@@ -147,6 +147,12 @@ Run multiple jobs in one crawl:
 
 ```sh
 npm exec -- arachnodex -c default -j sitemap -j link-issues
+```
+
+Run all default official jobs:
+
+```sh
+npm exec -- arachnodex -c default -j sitemap -j link-issues -j nfa-report
 ```
 
 Pass switches to a specific job by placing them after that job name and before the next `-j`:
@@ -345,6 +351,12 @@ Read the [Sitemap job README](packages/job-sitemap/README.md) for install notes,
 
 Read the [Link Issues job README](packages/job-link-issues/README.md) for install notes, usage examples, switches, finding severities, bot-protection behavior, and full job config settings.
 
+### NFA Report
+
+`@arachnodex/job-nfa-report` reports asset, media, and document references that are missing filename fingerprints or approved query-string cache-bust values. It scans common page markup references by default and can optionally scan same-site CSS/JS bodies for nested asset URLs.
+
+Read the [NFA Report job README](packages/job-nfa-report/README.md) for install notes, usage examples, switches, fingerprint rules, nested scanning behavior, ignore patterns, and full job config settings.
+
 ## Updating Individual Packages
 
 Arachnodex is designed as a set of independently published npm packages. You can update the core, jobs, or shared heuristic data separately when new versions are available.
@@ -359,6 +371,7 @@ Update one job:
 
 ```sh
 npm install @arachnodex/job-link-issues@latest
+npm install @arachnodex/job-nfa-report@latest
 npm install @arachnodex/job-sitemap@latest
 ```
 

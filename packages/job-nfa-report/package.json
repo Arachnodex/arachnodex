@@ -1,7 +1,7 @@
 {
-  "name": "@arachnodex/job-link-issues",
-  "version": "1.0.7",
-  "description": "Arachnodex job for reporting crawl link issues.",
+  "name": "@arachnodex/job-nfa-report",
+  "version": "1.0.1",
+  "description": "Arachnodex job for reporting non-fingerprinted asset references.",
   "type": "module",
   "main": "bin/index.js",
   "types": "types/index.d.ts",
@@ -11,19 +11,19 @@
       "development": "./src/index.ts",
       "default": "./bin/index.js"
     },
-    "./config/link-issues.example.json": "./config/link-issues.example.json"
+    "./config/nfa-report.example.json": "./config/nfa-report.example.json"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Arachnodex/arachnodex.git",
-    "directory": "packages/job-link-issues"
+    "directory": "packages/job-nfa-report"
   },
   "keywords": [
     "arachnodex",
     "crawler",
-    "broken links",
-    "link checker",
-    "seo"
+    "assets",
+    "cache busting",
+    "fingerprint"
   ],
   "author": "Rick Kukiela <rick@belniakmedia.com>",
   "license": "Apache-2.0",

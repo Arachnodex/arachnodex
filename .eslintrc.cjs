@@ -9,6 +9,7 @@ module.exports = {
             './packages/core/tsconfig.json',
             './packages/create/tsconfig.json',
             './packages/job-link-issues/tsconfig.json',
+            './packages/job-nfa-report/tsconfig.json',
             './packages/job-sitemap/tsconfig.json'
         ],
         tsconfigRootDir: __dirname, // <<< absolute path

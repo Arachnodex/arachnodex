@@ -2240,6 +2240,26 @@ export default class LinkIssues extends BaseJob {
         }
 
         const targetUrl = parsedUrl.href;
+        const decodedPath = this.getDecodedUrlPathFromUrl(targetUrl);
+        if(decodedPath !== null && this.undesirablePathCharacterPattern.test(decodedPath)) {
+            this.addIssue({
+                severity: 'notice',
+                group: 'URL Path Quality',
+                code: 'undesirable-path-character',
+                message: 'Decoded asset URL path contains characters outside the preferred URL character set.',
+                targetUrl,
+                sourceUrl: context.sourceUrl,
+                rawHref: trimmedUrl,
+                htmlSnippet: context.htmlSnippet,
+                normalizedUrl: targetUrl,
+                decodedPath,
+                zone: context.zone,
+                assetKind: context.kind,
+                sourceLabel: context.sourceLabel,
+                occurrenceDetails: context.occurrenceDetails
+            });
+        }
+
         if(this.isInsecureAssetReference(trimmedUrl, parsedUrl)) {
             this.addAssetContextIssue(
                 context,
@@ -2921,13 +2941,17 @@ export default class LinkIssues extends BaseJob {
     }
 
     private getDecodedUrlPath(link: PageLink): string|null {
-        if(typeof link.normalizedUrl !== 'string') {
+        return this.getDecodedUrlPathFromUrl(link.normalizedUrl);
+    }
+
+    private getDecodedUrlPathFromUrl(url?: string): string|null {
+        if(typeof url !== 'string') {
             return null;
         }
 
         let parsed: URL;
         try {
-            parsed = new URL(link.normalizedUrl);
+            parsed = new URL(url);
         } catch {
             return null;
         }
@@ -3767,9 +3791,15 @@ export default class LinkIssues extends BaseJob {
     }
 
     private shouldSkipOutgoingLinkAudit(pageData: PageData, canonicalUrl: string|null): boolean {
-        return canonicalUrl !== null
-            && canonicalUrl !== pageData.location.url
-            && this.processedPageUrls.has(canonicalUrl);
+        if(canonicalUrl === null || canonicalUrl === pageData.location.url) {
+            return false;
+        }
+
+        if(this.isCanonicalQueryVariant(pageData.location.url, canonicalUrl)) {
+            return false;
+        }
+
+        return this.processedPageUrls.has(canonicalUrl);
     }
 
     private auditCanonicalTargets(): void {
