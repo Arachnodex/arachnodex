@@ -78,6 +78,7 @@ Default config:
   "limitMail": true,
   "verbose": false,
   "nested": false,
+  "viteRollupFingerprintCompatibility": true,
   "fingerprintPattern": "[A-Za-z0-9]{8,}",
   "fingerprintSeparatorPattern": "\\.",
   "ignorePatterns": [],
@@ -141,8 +142,9 @@ Default config:
 | `limitMail` | boolean | `true` | Suppress this job's regular email report when no non-fingerprinted references were found. |
 | `verbose` | boolean | `false` | Print each unique finding as it is discovered. Can be enabled for one run with `-v` / `--verbose`. Core quiet mode still suppresses this output. |
 | `nested` | boolean | `false` | Scan same-site CSS and JavaScript bodies for nested asset references. Can be enabled for one run with `-n` / `--nested`. |
+| `viteRollupFingerprintCompatibility` | boolean | `true` | Accept Vite/Rollup default `name-[hash].ext` assets when the final dash segment is exactly eight URL-safe hash characters and looks hash-like. Disable this for strict separator-only fingerprint detection. |
 | `fingerprintPattern` | string | `"[A-Za-z0-9]{8,}"` | Regular expression used to identify a valid hash segment inside a filename stem. The job anchors this pattern to the full segment. |
-| `fingerprintSeparatorPattern` | string | `"\\."` | Regular expression used to identify the separator before the filename hash segment. Defaults to a literal dot. Use a character class such as `"[._-]"` to accept multiple separator characters. |
+| `fingerprintSeparatorPattern` | string | `"\\."` | Regular expression used to identify the separator before the filename hash segment. Defaults to a literal dot. Use a character class such as `"[._-]"` to accept multiple custom separator characters. |
 | `ignorePatterns` | string[] | `[]` | URL regular expressions to suppress findings that would otherwise be reported. |
 | `qsProps` | object | common cache-bust params | Map of query-string property names to regular expressions. When a URL has a matching property and value, the URL is treated as fingerprinted. |
 | `assetExtensions` | string[] | CSS, JS, fonts, images, manifest, map | File extensions treated as normal asset references. Extensions may be written with or without a leading dot. |
@@ -153,16 +155,20 @@ Default config:
 
 A URL is accepted as fingerprinted when either the filename or query string proves cache busting.
 
-Filename fingerprints must be the final separated segment before the extension: `name<separator><hash>.<ext>`. By default the separator is a literal dot, so the default shape is `name.<hash>.<ext>`. The default `fingerprintPattern` accepts alphanumeric hash segments of eight or more characters. This avoids treating ordinary words in one-dot filenames like `Products` in `Slide-Products-TDS_60882.pdf` as fingerprints because they are not in the configured hash-separator position.
+Filename fingerprints must be the final separated segment before the extension: `name<separator><hash>.<ext>`. By default the configured separator is a literal dot, so the configured shape is `name.<hash>.<ext>`. The default `fingerprintPattern` accepts alphanumeric hash segments of eight or more characters. This avoids treating ordinary words in one-dot filenames like `Products` in `catalog-products-tds_60882.pdf` as fingerprints because they are not in the configured hash-separator position.
+
+Vite and Rollup commonly emit assets as `name-[hash].ext` with an eight-character URL-safe base64 hash. When `viteRollupFingerprintCompatibility` is enabled, those default bundler assets are accepted when the final dash segment is exactly eight URL-safe hash characters and looks hash-like. Plain hyphenated asset names such as `product-selector.css` are still reported.
 
 Accepted examples:
 
 ```text
 /assets/app.2f4a9c0e.css
 /assets/runtime.9A7b6C5d.js
+/assets/app-2f4a9c0e.css
+/assets/admin-panel-Ab-cdE1F.css
 ```
 
-To also accept dash or underscore hash separators, configure:
+To also accept broader custom dash or underscore hash separators, configure:
 
 ```json
 {

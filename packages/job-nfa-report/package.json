@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/job-nfa-report",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "description": "Arachnodex job for reporting non-fingerprinted asset references.",
   "type": "module",
   "main": "bin/index.js",

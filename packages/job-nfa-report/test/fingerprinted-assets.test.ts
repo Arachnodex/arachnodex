@@ -127,16 +127,42 @@ test("hash-only filenames are still reported as non-fingerprinted", () => {
         === `${baseUrl}/assets/blog-images/ae26cd8d0d5e.png`));
 });
 
-test("hash-like segments without dot-hash-dot filename shape are reported", () => {
+test("vite and rollup default dash-separated hashes are accepted", () => {
     const job = createJob();
 
     job.onPageReceived(null, makePage([
         '<img src="/assets/app-2f4a9c0e.css" alt="">',
-        '<script src="/assets/runtime_9A7b6C5d.js"></script>'
+        '<script src="/assets/runtime_9A7b6C5d.js"></script>',
+        '<link rel="stylesheet" href="/assets/admin-panel-Ab-cdE1F.css">'
+    ].join("")));
+
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app-2f4a9c0e.css`), false);
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/admin-panel-Ab-cdE1F.css`), false);
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/runtime_9A7b6C5d.js`));
+});
+
+test("vite and rollup compatibility can be disabled", () => {
+    const job = createJob([], {viteRollupFingerprintCompatibility: false});
+
+    job.onPageReceived(null, makePage([
+        '<link rel="stylesheet" href="/assets/app-2f4a9c0e.css">',
+        '<link rel="stylesheet" href="/assets/app.2f4a9c0e.css">'
     ].join("")));
 
     assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app-2f4a9c0e.css`));
-    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/runtime_9A7b6C5d.js`));
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app.2f4a9c0e.css`), false);
+});
+
+test("plain hyphenated asset names are still reported", () => {
+    const job = createJob();
+
+    job.onPageReceived(null, makePage([
+        '<link rel="stylesheet" href="/assets/product-selector.css">',
+        '<script src="/assets/feature-products.js"></script>'
+    ].join("")));
+
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/product-selector.css`));
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/feature-products.js`));
 });
 
 test("configured fingerprint separators can accept dash and underscore hash boundaries", () => {

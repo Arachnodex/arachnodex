@@ -85,4 +85,4 @@ The job overwrites the configured output file at the end of each successful craw
 
 | Switch | Description |
 | --- | --- |
-| `-v`, `--version` | Print the Sitemap job version and exit without crawling. |
+| `-V`, `--version` | Print the Sitemap job version and exit without crawling. |

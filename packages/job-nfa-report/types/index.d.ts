@@ -12,6 +12,7 @@ export default class NfaReport extends BaseJob {
     private limitMail;
     private verbose;
     private nested;
+    private viteRollupFingerprintCompatibility;
     private promptOutput;
     private scannedPageCount;
     private scannedNestedCount;
@@ -55,6 +56,8 @@ export default class NfaReport extends BaseJob {
     private isRelativeJsModuleSpecifier;
     private isFingerprinted;
     private getFingerprintHashSegment;
+    private hasDefaultBundlerFingerprint;
+    private isHashLikeSegment;
     private hasAcceptedQueryFingerprint;
     private matchesIgnorePattern;
     private getAssetGroup;

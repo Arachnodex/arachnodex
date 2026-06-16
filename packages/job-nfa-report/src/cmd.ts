@@ -4,7 +4,7 @@ import {CommandExit, JobCommandParser, type ArgumentConfig} from "@arachnodex/co
 
 export default class NfaReportCmd extends JobCommandParser {
 
-    version = "1.0.0";
+    version = "1.0.3";
 
     constructor(args: string[], job: string) {
         const switches: {[k: string]: ArgumentConfig} = {

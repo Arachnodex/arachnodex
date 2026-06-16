@@ -3,6 +3,7 @@
   "limitMail": true,
   "verbose": false,
   "nested": false,
+  "viteRollupFingerprintCompatibility": true,
   "fingerprintPattern": "[A-Za-z0-9]{8,}",
   "fingerprintSeparatorPattern": "\\.",
   "ignorePatterns": [],

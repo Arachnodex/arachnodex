@@ -73,6 +73,7 @@ interface NfaReportConfig extends JSONObject {
     limitMail: boolean;
     verbose: boolean;
     nested: boolean;
+    viteRollupFingerprintCompatibility: boolean;
     fingerprintPattern: string;
     fingerprintSeparatorPattern: string;
     ignorePatterns: string[];
@@ -87,6 +88,7 @@ const defaultConfig: NfaReportConfig = {
     limitMail: true,
     verbose: false,
     nested: false,
+    viteRollupFingerprintCompatibility: true,
     fingerprintPattern: "[A-Za-z0-9]{8,}",
     fingerprintSeparatorPattern: "\\.",
     ignorePatterns: [],
@@ -170,6 +172,7 @@ export default class NfaReport extends BaseJob {
     private limitMail = true;
     private verbose = false;
     private nested = false;
+    private viteRollupFingerprintCompatibility = true;
     private promptOutput = false;
     private scannedPageCount = 0;
     private scannedNestedCount = 0;
@@ -199,6 +202,9 @@ export default class NfaReport extends BaseJob {
                 && value.fingerprintSeparatorPattern !== ""
                 ? value.fingerprintSeparatorPattern
                 : defaultConfig.fingerprintSeparatorPattern;
+            value.viteRollupFingerprintCompatibility = typeof value.viteRollupFingerprintCompatibility === "boolean"
+                ? value.viteRollupFingerprintCompatibility
+                : defaultConfig.viteRollupFingerprintCompatibility;
             value.ignorePatterns = stringArray(value.ignorePatterns, defaultConfig.ignorePatterns);
             value.assetExtensions = stringArray(value.assetExtensions, defaultConfig.assetExtensions);
             value.mediaExtensions = stringArray(value.mediaExtensions, defaultConfig.mediaExtensions);
@@ -210,6 +216,7 @@ export default class NfaReport extends BaseJob {
         this.limitMail = config.limitMail;
         this.verbose = config.verbose;
         this.nested = config.nested;
+        this.viteRollupFingerprintCompatibility = config.viteRollupFingerprintCompatibility;
         this.baseUrl = this.config.getConfigString("baseUrl").replace(/\/+$/, "");
         this.baseHostname = this.normalizeHostname(new URL(this.baseUrl).hostname);
         this.fingerprintPattern = this.compileFingerprintPattern(config.fingerprintPattern);
@@ -801,11 +808,11 @@ export default class NfaReport extends BaseJob {
         const stem = this.safeDecode(filename.substring(0, dotPosition));
         const hashSegment = this.getFingerprintHashSegment(stem);
         if(hashSegment === null) {
-            return false;
+            return this.hasDefaultBundlerFingerprint(stem);
         }
 
         this.fingerprintPattern.lastIndex = 0;
-        return this.fingerprintPattern.test(hashSegment);
+        return this.fingerprintPattern.test(hashSegment) || this.hasDefaultBundlerFingerprint(stem);
     }
 
     private getFingerprintHashSegment(stem: string): string|null {
@@ -829,6 +836,35 @@ export default class NfaReport extends BaseJob {
         }
 
         return stem.substring(separatorEnd);
+    }
+
+    private hasDefaultBundlerFingerprint(stem: string): boolean {
+        if(!this.viteRollupFingerprintCompatibility) {
+            return false;
+        }
+
+        const viteRollupHashPattern = /^[A-Za-z0-9_-]{8}$/;
+        for(let index = stem.indexOf("-"); index !== -1; index = stem.indexOf("-", index + 1)) {
+            if(index <= 0 || index >= stem.length - 1) {
+                continue;
+            }
+
+            const hashSegment = stem.substring(index + 1);
+            if(viteRollupHashPattern.test(hashSegment) && this.isHashLikeSegment(hashSegment)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private isHashLikeSegment(hashSegment: string): boolean {
+        if(/[0-9_-]/.test(hashSegment)) {
+            return true;
+        }
+
+        const uppercaseCount = hashSegment.replace(/[^A-Z]/g, "").length;
+        return uppercaseCount >= 2;
     }
 
     private hasAcceptedQueryFingerprint(parsed: URL): boolean {

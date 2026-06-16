@@ -8,8 +8,8 @@ export default class SitemapCmd extends JobCommandParser {
     constructor(args: string[], job: string)  {
 
         const switches:{[k: string]: ArgumentConfig} = {
-            '-v': {
-                switch: '-v',
+            '-V': {
+                switch: '-V',
                 aliases: ['--version'],
                 value: false,
                 description: 'Output the Sitemap job version and terminate.',
@@ -19,8 +19,8 @@ export default class SitemapCmd extends JobCommandParser {
 
         super(args, switches, job);
 
-        if(this.arguments['-v'].active === true) {
-            console.log('Sitemap Generator Job Version 1.0');
+        if(this.arguments['-V'].active === true) {
+            console.log('Sitemap Generator Job Version 1.0.2');
             throw new CommandExit(0);
         }
     }
