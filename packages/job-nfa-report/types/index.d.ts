@@ -57,6 +57,8 @@ export default class NfaReport extends BaseJob {
     private isFingerprinted;
     private getFingerprintHashSegment;
     private hasDefaultBundlerFingerprint;
+    private hasViteRollupHashSegment;
+    private canUseViteRollupFingerprintCompatibility;
     private isHashLikeSegment;
     private hasAcceptedQueryFingerprint;
     private matchesIgnorePattern;

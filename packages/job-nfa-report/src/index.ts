@@ -563,7 +563,7 @@ export default class NfaReport extends BaseJob {
             return;
         }
 
-        if(this.isFingerprinted(parsed)) {
+        if(this.isFingerprinted(parsed, group)) {
             this.queueNestedScanIfNeeded(parsed);
             return;
         }
@@ -794,7 +794,7 @@ export default class NfaReport extends BaseJob {
         }
     }
 
-    private isFingerprinted(parsed: URL): boolean {
+    private isFingerprinted(parsed: URL, group: AssetGroup): boolean {
         if(this.hasAcceptedQueryFingerprint(parsed)) {
             return true;
         }
@@ -808,11 +808,13 @@ export default class NfaReport extends BaseJob {
         const stem = this.safeDecode(filename.substring(0, dotPosition));
         const hashSegment = this.getFingerprintHashSegment(stem);
         if(hashSegment === null) {
-            return this.hasDefaultBundlerFingerprint(stem);
+            return this.hasDefaultBundlerFingerprint(stem, group);
         }
 
         this.fingerprintPattern.lastIndex = 0;
-        return this.fingerprintPattern.test(hashSegment) || this.hasDefaultBundlerFingerprint(stem);
+        return this.fingerprintPattern.test(hashSegment)
+            || this.hasViteRollupHashSegment(hashSegment, group)
+            || this.hasDefaultBundlerFingerprint(stem, group);
     }
 
     private getFingerprintHashSegment(stem: string): string|null {
@@ -838,19 +840,18 @@ export default class NfaReport extends BaseJob {
         return stem.substring(separatorEnd);
     }
 
-    private hasDefaultBundlerFingerprint(stem: string): boolean {
-        if(!this.viteRollupFingerprintCompatibility) {
+    private hasDefaultBundlerFingerprint(stem: string, group: AssetGroup): boolean {
+        if(!this.canUseViteRollupFingerprintCompatibility(group)) {
             return false;
         }
 
-        const viteRollupHashPattern = /^[A-Za-z0-9_-]{8}$/;
         for(let index = stem.indexOf("-"); index !== -1; index = stem.indexOf("-", index + 1)) {
             if(index <= 0 || index >= stem.length - 1) {
                 continue;
             }
 
             const hashSegment = stem.substring(index + 1);
-            if(viteRollupHashPattern.test(hashSegment) && this.isHashLikeSegment(hashSegment)) {
+            if(this.hasViteRollupHashSegment(hashSegment, group)) {
                 return true;
             }
         }
@@ -858,13 +859,26 @@ export default class NfaReport extends BaseJob {
         return false;
     }
 
+    private hasViteRollupHashSegment(hashSegment: string, group: AssetGroup): boolean {
+        if(!this.canUseViteRollupFingerprintCompatibility(group)) {
+            return false;
+        }
+
+        return /^[A-Za-z0-9_-]{8}$/.test(hashSegment) && this.isHashLikeSegment(hashSegment);
+    }
+
+    private canUseViteRollupFingerprintCompatibility(group: AssetGroup): boolean {
+        return this.viteRollupFingerprintCompatibility && group !== "document";
+    }
+
     private isHashLikeSegment(hashSegment: string): boolean {
-        if(/[0-9_-]/.test(hashSegment)) {
+        if(/[0-9]/.test(hashSegment)) {
             return true;
         }
 
         const uppercaseCount = hashSegment.replace(/[^A-Z]/g, "").length;
-        return uppercaseCount >= 2;
+        const lowercaseCount = hashSegment.replace(/[^a-z]/g, "").length;
+        return uppercaseCount >= 2 && lowercaseCount >= 2;
     }
 
     private hasAcceptedQueryFingerprint(parsed: URL): boolean {

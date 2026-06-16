@@ -127,18 +127,62 @@ test("hash-only filenames are still reported as non-fingerprinted", () => {
         === `${baseUrl}/assets/blog-images/ae26cd8d0d5e.png`));
 });
 
-test("vite and rollup default dash-separated hashes are accepted", () => {
+test("vite and rollup url-safe hash segments are accepted", () => {
     const job = createJob();
 
     job.onPageReceived(null, makePage([
         '<img src="/assets/app-2f4a9c0e.css" alt="">',
+        '<script src="/assets/runtime.AqTz_LpQ.js"></script>',
         '<script src="/assets/runtime_9A7b6C5d.js"></script>',
+        '<script src="/sc-skins/slide2016/assets/compiled/js/pc-bundle.DBLn09_S.js"></script>',
         '<link rel="stylesheet" href="/assets/admin-panel-Ab-cdE1F.css">'
     ].join("")));
 
     assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app-2f4a9c0e.css`), false);
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/runtime.AqTz_LpQ.js`), false);
     assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/admin-panel-Ab-cdE1F.css`), false);
+    assert.equal(findings(job).some(finding => finding.targetUrl
+        === `${baseUrl}/sc-skins/slide2016/assets/compiled/js/pc-bundle.DBLn09_S.js`), false);
     assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/runtime_9A7b6C5d.js`));
+});
+
+test("vite and rollup compatibility does not accept ordinary snake-case words", () => {
+    const job = createJob();
+
+    job.onPageReceived(null, makePage([
+        '<link rel="stylesheet" href="/assets/customers.help_doc.css">',
+        '<a href="/documents/customers.help_doc.pdf">PDF</a>'
+    ].join("")));
+
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/customers.help_doc.css`));
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/documents/customers.help_doc.pdf`));
+});
+
+test("vite and rollup compatibility is limited to asset and media references", () => {
+    const job = createJob();
+
+    job.onPageReceived(null, makePage([
+        '<script src="/assets/app.DBLn09_S.js"></script>',
+        '<video src="/media/intro.DBLn09_S.mp4"></video>',
+        '<a href="/documents/manual.DBLn09_S.pdf">PDF</a>'
+    ].join("")));
+
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app.DBLn09_S.js`), false);
+    assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/media/intro.DBLn09_S.mp4`), false);
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/documents/manual.DBLn09_S.pdf`));
+});
+
+test("lowercase hex document fingerprints match the default pattern", () => {
+    const job = createJob();
+
+    job.onPageReceived(null, makePage([
+        '<a href="/documents/manual.a1b2c3d4e5f6.pdf">PDF</a>',
+        '<a href="/documents/manual.DBLn09_S.pdf">PDF</a>'
+    ].join("")));
+
+    assert.equal(findings(job).some(finding => finding.targetUrl
+        === `${baseUrl}/documents/manual.a1b2c3d4e5f6.pdf`), false);
+    assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/documents/manual.DBLn09_S.pdf`));
 });
 
 test("vite and rollup compatibility can be disabled", () => {
@@ -146,10 +190,13 @@ test("vite and rollup compatibility can be disabled", () => {
 
     job.onPageReceived(null, makePage([
         '<link rel="stylesheet" href="/assets/app-2f4a9c0e.css">',
+        '<script src="/sc-skins/slide2016/assets/compiled/js/pc-bundle.DBLn09_S.js"></script>',
         '<link rel="stylesheet" href="/assets/app.2f4a9c0e.css">'
     ].join("")));
 
     assert.ok(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app-2f4a9c0e.css`));
+    assert.ok(findings(job).some(finding => finding.targetUrl
+        === `${baseUrl}/sc-skins/slide2016/assets/compiled/js/pc-bundle.DBLn09_S.js`));
     assert.equal(findings(job).some(finding => finding.targetUrl === `${baseUrl}/assets/app.2f4a9c0e.css`), false);
 });
 

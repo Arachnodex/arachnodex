@@ -142,7 +142,7 @@ Default config:
 | `limitMail` | boolean | `true` | Suppress this job's regular email report when no non-fingerprinted references were found. |
 | `verbose` | boolean | `false` | Print each unique finding as it is discovered. Can be enabled for one run with `-v` / `--verbose`. Core quiet mode still suppresses this output. |
 | `nested` | boolean | `false` | Scan same-site CSS and JavaScript bodies for nested asset references. Can be enabled for one run with `-n` / `--nested`. |
-| `viteRollupFingerprintCompatibility` | boolean | `true` | Accept Vite/Rollup default `name-[hash].ext` assets when the final dash segment is exactly eight URL-safe hash characters and looks hash-like. Disable this for strict separator-only fingerprint detection. |
+| `viteRollupFingerprintCompatibility` | boolean | `true` | Accept Vite/Rollup default eight-character URL-safe hashes for asset and media references when the segment looks hash-like. Disable this for strict separator-only fingerprint detection. |
 | `fingerprintPattern` | string | `"[A-Za-z0-9]{8,}"` | Regular expression used to identify a valid hash segment inside a filename stem. The job anchors this pattern to the full segment. |
 | `fingerprintSeparatorPattern` | string | `"\\."` | Regular expression used to identify the separator before the filename hash segment. Defaults to a literal dot. Use a character class such as `"[._-]"` to accept multiple custom separator characters. |
 | `ignorePatterns` | string[] | `[]` | URL regular expressions to suppress findings that would otherwise be reported. |
@@ -157,13 +157,42 @@ A URL is accepted as fingerprinted when either the filename or query string prov
 
 Filename fingerprints must be the final separated segment before the extension: `name<separator><hash>.<ext>`. By default the configured separator is a literal dot, so the configured shape is `name.<hash>.<ext>`. The default `fingerprintPattern` accepts alphanumeric hash segments of eight or more characters. This avoids treating ordinary words in one-dot filenames like `Products` in `catalog-products-tds_60882.pdf` as fingerprints because they are not in the configured hash-separator position.
 
-Vite and Rollup commonly emit assets as `name-[hash].ext` with an eight-character URL-safe base64 hash. When `viteRollupFingerprintCompatibility` is enabled, those default bundler assets are accepted when the final dash segment is exactly eight URL-safe hash characters and looks hash-like. Plain hyphenated asset names such as `product-selector.css` are still reported.
+### Vite/Rollup Compatibility
+
+`viteRollupFingerprintCompatibility` is an additive compatibility layer for common Vite/Rollup build output. It does not replace `fingerprintPattern`, and it does not change query-string matching.
+
+As of Vite 8.0.16 with Rollup 4.62.0, Vite's default non-library build output uses Rollup `[hash]` placeholders in patterns like `assets/[name]-[hash].js` and `assets/[name]-[hash].[ext]`. Rollup's default `[hash]` is base64, so generated hashes can contain letters, numbers, `_`, and `-`. Vite's default emitted hashes are commonly eight characters long, such as `DBLn09_S`.
+
+With the default NFA settings:
+
+- `fingerprintPattern` is still checked first for the configured separator position. The default pattern, `[A-Za-z0-9]{8,}`, accepts normal dot-separated alphanumeric hashes such as `app.2f4a9c0e.css`.
+- When `viteRollupFingerprintCompatibility` is enabled, asset and media references also accept exactly eight URL-safe Rollup/Vite hash characters in the configured separator position, so `pc-bundle.DBLn09_S.js` is accepted even though `_` is not part of the default `fingerprintPattern`.
+- The compatibility layer also accepts default dash-form bundler assets, such as `app-2f4a9c0e.css` and `admin-panel-Ab-cdE1F.css`, when the final dash segment is exactly eight URL-safe hash characters and looks hash-like.
+- A compatibility hash segment looks hash-like when it contains a digit, or when it has mixed-case entropy with at least two uppercase and two lowercase letters. `_` or `-` alone is not enough, so ordinary names such as `customers.help_doc.css` and `product-selector.css` are still reported.
+- The compatibility layer applies only to asset and media references. Document references still require `fingerprintPattern` or `qsProps` to prove fingerprinting.
+
+If your Vite/Rollup build customizes `rollupOptions.output.hashCharacters`, uses a non-default hash length, or uses a different filename separator, configure `fingerprintPattern` and `fingerprintSeparatorPattern` explicitly. The compatibility setting intentionally targets the default Vite/Rollup hash style instead of trying to recognize every possible custom build format.
+
+Default behavior comparison:
+
+| URL | Compat enabled | Compat disabled | Why |
+| --- | --- | --- | --- |
+| `/assets/app.2f4a9c0e.css` | accepted | accepted | Dot-separated alphanumeric hash matches the default `fingerprintPattern`. |
+| `/assets/runtime.9A7b6C5d.js` | accepted | accepted | Dot-separated alphanumeric hash matches the default `fingerprintPattern`. |
+| `/assets/pc-bundle.DBLn09_S.js` | accepted | reported | `_` is valid for default Rollup/Vite hashes, but not for the default `fingerprintPattern`. |
+| `/assets/app-2f4a9c0e.css` | accepted | reported | Dash-form `name-[hash].ext` is accepted only by the compatibility layer. |
+| `/assets/admin-panel-Ab-cdE1F.css` | accepted | reported | Dash-form mixed-case/digit hash is accepted only by the compatibility layer. |
+| `/assets/runtime_9A7b6C5d.js` | reported | reported | `_` is not the default configured separator; use `fingerprintSeparatorPattern` for this style. |
+| `/assets/customers.help_doc.css` | reported | reported | `_` alone is not enough to make an ordinary word segment hash-like. |
+| `/documents/manual.DBLn09_S.pdf` | reported | reported | Vite/Rollup compatibility does not apply to document references. |
 
 Accepted examples:
 
 ```text
 /assets/app.2f4a9c0e.css
 /assets/runtime.9A7b6C5d.js
+/assets/runtime.AqTz_LpQ.js
+/assets/pc-bundle.DBLn09_S.js
 /assets/app-2f4a9c0e.css
 /assets/admin-panel-Ab-cdE1F.css
 ```
@@ -184,8 +213,10 @@ Rejected by default examples:
 /assets/app.css
 /assets/2f4a9c0e.css
 /assets/app2f4a9c0e.css
-/assets/app-2f4a9c0e.css
 /assets/runtime_9A7b6C5d.js
+/assets/customers.help_doc.css
+/documents/customers.help_doc.pdf
+/documents/manual.DBLn09_S.pdf
 ```
 
 The second rejected example is only a hash plus extension. The job requires at least one other filename segment before the configured hash separator so reports stay focused on real named assets with build fingerprints.
