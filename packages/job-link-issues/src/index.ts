@@ -713,8 +713,7 @@ export default class LinkIssues extends BaseJob {
             severityEntries.forEach(entry => {
                 const issue = entry.issue;
                 const issueKey = entry.key;
-                const wrapperMeta = this.getWrapperMeta(issueKey)
-                    ?? (typeof issue.targetUrl === 'string' ? this.getWrapperMeta(issue.targetUrl) : null);
+                const wrapperMeta = this.getEntryWrapperMeta(entry);
                 if(wrapperMeta !== null && reportedWrapperIssues.has(issueKey)) {
                     return;
                 }
@@ -1573,7 +1572,15 @@ export default class LinkIssues extends BaseJob {
 
     private getEntryWrapperMeta(entry: ReportIssueEntry): WrapperMeta|null {
         return this.getWrapperMeta(entry.key)
-            ?? (typeof entry.issue.targetUrl === 'string' ? this.getWrapperMeta(entry.issue.targetUrl) : null);
+            ?? (
+                this.shouldUseTargetUrlWrapperFallback(entry.issue) && typeof entry.issue.targetUrl === 'string'
+                    ? this.getWrapperMeta(entry.issue.targetUrl)
+                    : null
+            );
+    }
+
+    private shouldUseTargetUrlWrapperFallback(issue: LinkIssue): boolean {
+        return !reportByRawHrefCodes.has(issue.code);
     }
 
     private getPromptSectionNote(section: PromptSection): string {

@@ -154,6 +154,7 @@ export default class LinkIssues extends BaseJob {
     private getPromptSectionGuidance;
     private getPromptGuidanceForIssue;
     private getEntryWrapperMeta;
+    private shouldUseTargetUrlWrapperFallback;
     private getPromptSectionNote;
     private formatPromptEntryTitle;
     private getPromptEntryDetails;

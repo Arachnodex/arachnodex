@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/job-link-issues",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Arachnodex job for reporting crawl link issues.",
   "type": "module",
   "main": "bin/index.js",

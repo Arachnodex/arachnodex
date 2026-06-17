@@ -11,6 +11,8 @@ type IssueLike = {
     code: string;
     targetUrl?: string;
     sourceUrl?: string;
+    rawHref?: string;
+    htmlSnippet?: string;
     finalUrl?: string;
     decodedPath?: string;
     assetKind?: string;
@@ -106,6 +108,37 @@ function javascriptLink(referer: string): PageLink {
         zone: "main",
         isExternal: false,
         isCrawlable: false
+    };
+}
+
+function pageLink({
+    rawHref,
+    referer,
+    htmlSnippet,
+    normalizedUrl,
+    zone = "main",
+    target,
+    rel
+}: {
+    rawHref: string;
+    referer: string;
+    htmlSnippet: string;
+    normalizedUrl: string;
+    zone?: PageLink["zone"];
+    target?: string;
+    rel?: string;
+}): PageLink {
+    return {
+        rawHref,
+        hasHref: true,
+        referer,
+        htmlSnippet,
+        normalizedUrl,
+        zone,
+        target,
+        rel,
+        isExternal: false,
+        isCrawlable: true
     };
 }
 
@@ -205,4 +238,96 @@ test("asset URLs are checked for undesirable decoded path characters when asset 
     }));
 
     assert.equal(issues(disabledJob).some(issue => issue.targetUrl === badAssetUrl), false);
+});
+
+test("target blank rel findings do not borrow wrapper metadata from matching good nav links", () => {
+    const job = createJob();
+    const pageAUrl = `${baseUrl}/account`;
+    const pageBUrl = `${baseUrl}/mro`;
+    const contactUrl = `${baseUrl}/contact`;
+    const navSnippet = '<a href="/contact#form">Get Expert Advice</a>';
+    const badSnippet = '<a href="/contact#form" target="_blank"><i>Slide team expert</i></a>';
+
+    job.onPageReceived(response, makePage({
+        url: pageAUrl,
+        canonicalUrl: pageAUrl,
+        rawLinks: [
+            pageLink({
+                rawHref: "/contact#form",
+                referer: pageAUrl,
+                htmlSnippet: navSnippet,
+                normalizedUrl: contactUrl,
+                zone: "nav"
+            })
+        ]
+    }));
+    job.onPageReceived(response, makePage({
+        url: pageBUrl,
+        canonicalUrl: pageBUrl,
+        rawLinks: [
+            pageLink({
+                rawHref: "/contact#form",
+                referer: pageBUrl,
+                htmlSnippet: navSnippet,
+                normalizedUrl: contactUrl,
+                zone: "nav"
+            }),
+            pageLink({
+                rawHref: "/contact#form",
+                referer: pageBUrl,
+                htmlSnippet: badSnippet,
+                normalizedUrl: contactUrl,
+                zone: "main",
+                target: "_blank"
+            })
+        ]
+    }));
+
+    const finding = issues(job).find(issue => issue.code === "target-blank-rel");
+    assert.equal(finding?.sourceUrl, pageBUrl);
+    assert.equal(finding?.rawHref, "/contact#form");
+    assert.equal(finding?.htmlSnippet, badSnippet);
+
+    const html = job.getReportHtml();
+    assert.match(html, /Anchor HTML: &lt;a href=&quot;\/contact#form&quot; target=&quot;_blank&quot;&gt;&lt;i&gt;Slide team expert&lt;\/i&gt;&lt;\/a&gt;/);
+    assert.match(html, /Found on 1 page \(1 occurrence\):/);
+    assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(html, /Wrapper link: likely nav/);
+    assert.doesNotMatch(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("target url wrapper fallback still groups plain target status issues", () => {
+    const job = createJob();
+    const pageAUrl = `${baseUrl}/`;
+    const pageBUrl = `${baseUrl}/products`;
+    const brokenUrl = `${baseUrl}/old-page`;
+
+    [pageAUrl, pageBUrl].forEach(pageUrl => {
+        job.onPageReceived(response, makePage({
+            url: pageUrl,
+            canonicalUrl: pageUrl,
+            rawLinks: [
+                pageLink({
+                    rawHref: "/old-page",
+                    referer: pageUrl,
+                    htmlSnippet: '<a href="/old-page">Old page</a>',
+                    normalizedUrl: brokenUrl,
+                    zone: "nav"
+                })
+            ]
+        }));
+    });
+
+    job.onHeadersReceived({status: 404} as AxiosResponse, {
+        url: brokenUrl,
+        rawUrl: "/old-page",
+        referer: pageBUrl,
+        htmlSnippet: '<a href="/old-page">Old page</a>',
+        statusCode: 404
+    });
+
+    const html = job.getReportHtml();
+    assert.match(html, /Wrapper link: likely nav; found on 2 of 2 scanned pages \(100%\), 2 occurrences\./);
+    assert.match(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
