@@ -11,6 +11,7 @@ type ScaffoldConfig = {
 
 const packageDependencies = {
     "@arachnodex/core": "^1.0.8",
+    "@arachnodex/job-csp-report": "^1.0.0",
     "@arachnodex/job-link-issues": "^1.0.7",
     "@arachnodex/job-nfa-report": "^1.0.0",
     "@arachnodex/job-sitemap": "^1.0.1"
@@ -26,6 +27,11 @@ const configFiles = [
         specifier: "@arachnodex/core/config/default.example.json",
         exampleFile: "default.example.json",
         runtimeFile: "default.json"
+    },
+    {
+        specifier: "@arachnodex/job-csp-report/config/csp-report.example.json",
+        exampleFile: "csp-report.example.json",
+        runtimeFile: "csp-report.json"
     },
     {
         specifier: "@arachnodex/job-link-issues/config/link-issues.example.json",

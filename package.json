@@ -28,6 +28,7 @@
     "packages/bot-protection-heuristics",
     "packages/create",
     "packages/core",
+    "packages/job-csp-report",
     "packages/job-link-issues",
     "packages/job-nfa-report",
     "packages/job-sitemap"

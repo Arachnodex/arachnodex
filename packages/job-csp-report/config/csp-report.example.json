@@ -1,0 +1,18 @@
+{
+  "emailReportEnabled": true,
+  "outputFormat": "apache",
+  "nested": true,
+  "unsafeInline": false,
+  "includeReportOnly": true,
+  "includeEnforce": true,
+  "reportUri": "",
+  "reportTo": "",
+  "ignorePatterns": [],
+  "additionalSources": {},
+  "ignoreSources": {},
+  "staticDirectives": {
+    "default-src": ["'self'"],
+    "base-uri": ["'self'"],
+    "frame-ancestors": ["'self'"]
+  }
+}

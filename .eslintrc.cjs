@@ -8,6 +8,7 @@ module.exports = {
             './packages/bot-protection-heuristics/tsconfig.json',
             './packages/core/tsconfig.json',
             './packages/create/tsconfig.json',
+            './packages/job-csp-report/tsconfig.json',
             './packages/job-link-issues/tsconfig.json',
             './packages/job-nfa-report/tsconfig.json',
             './packages/job-sitemap/tsconfig.json'

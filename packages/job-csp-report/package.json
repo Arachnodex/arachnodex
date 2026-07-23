@@ -1,23 +1,29 @@
 {
-  "name": "@arachnodex/create",
-  "version": "1.0.6",
-  "description": "Create an Arachnodex crawler project.",
+  "name": "@arachnodex/job-csp-report",
+  "version": "1.0.0",
+  "description": "Arachnodex job for generating Content Security Policy header reports.",
   "type": "module",
   "main": "bin/index.js",
   "types": "types/index.d.ts",
-  "bin": {
-    "create": "bin/index.js"
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "development": "./src/index.ts",
+      "default": "./bin/index.js"
+    },
+    "./config/csp-report.example.json": "./config/csp-report.example.json"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Arachnodex/arachnodex.git",
-    "directory": "packages/create"
+    "directory": "packages/job-csp-report"
   },
   "keywords": [
     "arachnodex",
     "crawler",
-    "create",
-    "scaffold"
+    "csp",
+    "content security policy",
+    "security headers"
   ],
   "author": "Rick Kukiela <rick@belniakmedia.com>",
   "license": "Apache-2.0",
@@ -29,6 +35,7 @@
     "access": "public"
   },
   "files": [
+    "config/*.example.json",
     "bin",
     "src",
     "types"
@@ -37,16 +44,17 @@
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
     "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
     "build:types": "tsc -p tsconfig.types.json",
-    "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\" && npm run build:types"
+    "test": "node --conditions=development --import tsx test/*.test.ts",
+    "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --outfile=bin/index.js && npm run build:types"
   },
   "dependencies": {
-    "@arachnodex/core": "^1.0.8",
-    "@arachnodex/job-csp-report": "^1.0.0",
-    "@arachnodex/job-link-issues": "^1.0.7",
-    "@arachnodex/job-nfa-report": "^1.0.0",
-    "@arachnodex/job-sitemap": "^1.0.1"
+    "axios": "^1.12.2"
+  },
+  "peerDependencies": {
+    "@arachnodex/core": "^1.0.7"
   },
   "devDependencies": {
+    "@arachnodex/core": "^1.0.7",
     "@types/node": "^22",
     "esbuild": "^0.25.0",
     "typescript": "^5.6.3"
