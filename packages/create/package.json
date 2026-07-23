@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/create",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Create an Arachnodex crawler project.",
   "type": "module",
   "main": "bin/index.js",
