@@ -9,6 +9,8 @@ import LinkIssues from "../src/index.ts";
 
 type IssueLike = {
     code: string;
+    severity?: string;
+    group?: string;
     targetUrl?: string;
     sourceUrl?: string;
     rawHref?: string;
@@ -17,6 +19,7 @@ type IssueLike = {
     decodedPath?: string;
     assetKind?: string;
     sourceLabel?: string;
+    statusCode?: number;
 };
 
 type AssetLike = {
@@ -29,6 +32,7 @@ type JobConfigOverrides = {
         codes?: string[];
         groups?: string[];
         severities?: string[];
+        statusCodes?: number[];
         urlPattern: string;
     }>;
 };
@@ -150,6 +154,12 @@ function assets(job: LinkIssues): AssetLike[] {
     return Array.from(job.assetLinks.values()) as AssetLike[];
 }
 
+function shouldSuppressIssue(job: LinkIssues, issue: IssueLike): boolean {
+    return (job as unknown as {
+        shouldSuppressIssue(candidate: IssueLike): boolean;
+    }).shouldSuppressIssue(issue);
+}
+
 test("query-string canonical variants still audit outgoing links and assets after canonical page was processed", () => {
     const job = createJob({includeAssets: true});
     const canonicalUrl = `${baseUrl}/`;
@@ -210,6 +220,40 @@ test("canonical-query-variant notices are still reported and suppressible", () =
     suppressedJob.onPageReceived(response, makePage({url: variantUrl, canonicalUrl}));
 
     assert.equal(issues(suppressedJob).some(issue => issue.code === "canonical-query-variant"), false);
+});
+
+test("ignored issue patterns can target only HTTP 429 external link errors", () => {
+    const job = createJob({
+        configOverrides: {
+            ignoredIssuePatterns: [{
+                groups: ["External Links"],
+                statusCodes: [429],
+                urlPattern: ".*"
+            }]
+        }
+    });
+    job.loadConfig();
+
+    const issue = {
+        severity: "error",
+        group: "External Links",
+        code: "external-error",
+        targetUrl: "https://external.example/resource"
+    };
+
+    assert.equal(shouldSuppressIssue(job, {...issue, statusCode: 429}), true);
+    assert.equal(shouldSuppressIssue(job, {...issue, statusCode: 404}), false);
+    assert.equal(shouldSuppressIssue(job, {
+        ...issue,
+        code: "external-bot-protection",
+        statusCode: 429
+    }), true);
+    assert.equal(shouldSuppressIssue(job, {
+        ...issue,
+        group: "Asset Links",
+        code: "asset-error",
+        statusCode: 429
+    }), false);
 });
 
 test("asset URLs are checked for undesirable decoded path characters when asset collection is enabled", () => {

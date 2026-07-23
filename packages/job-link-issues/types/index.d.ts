@@ -45,6 +45,7 @@ type IgnoredIssuePattern = {
     codes: Set<string> | null;
     groups: Set<string> | null;
     severities: Set<LinkIssueSeverity> | null;
+    statusCodes: Set<number> | null;
 };
 type LinkOccurrence = {
     referer: string;
@@ -216,6 +217,7 @@ export default class LinkIssues extends BaseJob {
     private compileUndesirablePathCharacterPattern;
     private compileIgnoredIssuePatterns;
     private compileStringSelector;
+    private compileStatusCodeSelector;
     private compileSeveritySelector;
     private normalizeEmailReportTriggerLevels;
     private getDecodedUrlPath;

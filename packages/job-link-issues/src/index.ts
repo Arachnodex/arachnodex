@@ -56,6 +56,7 @@ interface IgnoredIssuePatternConfig extends JSONObject {
     codes?: string[];
     groups?: string[];
     severities?: LinkIssueSeverity[];
+    statusCodes?: number[];
 }
 
 interface LinkIssuesConfig extends JSONObject {
@@ -117,6 +118,7 @@ type IgnoredIssuePattern = {
     codes: Set<string>|null;
     groups: Set<string>|null;
     severities: Set<LinkIssueSeverity>|null;
+    statusCodes: Set<number>|null;
 }
 
 type LinkOccurrence = {
@@ -590,6 +592,10 @@ export default class LinkIssues extends BaseJob {
                 return false;
             }
             if(ignore.severities !== null && !ignore.severities.has(issue.severity)) {
+                return false;
+            }
+            if(ignore.statusCodes !== null
+                && (typeof issue.statusCode !== 'number' || !ignore.statusCodes.has(issue.statusCode))) {
                 return false;
             }
 
@@ -2890,7 +2896,8 @@ export default class LinkIssues extends BaseJob {
                     pattern: new RegExp(config.urlPattern),
                     codes: this.compileStringSelector(config.codes),
                     groups: this.compileStringSelector(config.groups),
-                    severities: this.compileSeveritySelector(config.severities)
+                    severities: this.compileSeveritySelector(config.severities),
+                    statusCodes: this.compileStatusCodeSelector(config.statusCodes)
                 });
             } catch {
                 // Invalid ignore patterns are skipped so one typo does not disable the job.
@@ -2907,6 +2914,21 @@ export default class LinkIssues extends BaseJob {
         const selector = new Set<string>();
         values.forEach(value => {
             if(typeof value === 'string' && value !== '') {
+                selector.add(value);
+            }
+        });
+
+        return selector.size > 0 ? selector : null;
+    }
+
+    private compileStatusCodeSelector(values?: number[]): Set<number>|null {
+        if(!Array.isArray(values)) {
+            return null;
+        }
+
+        const selector = new Set<number>();
+        values.forEach(value => {
+            if(Number.isInteger(value) && value >= 100 && value <= 599) {
                 selector.add(value);
             }
         });

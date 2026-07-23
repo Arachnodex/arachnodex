@@ -113,7 +113,20 @@ Each `ignoredIssuePatterns` entry supports:
   "codes": ["external-redirect"],
   "groups": ["External Links"],
   "severities": ["warning"],
+  "statusCodes": [301, 302],
   "urlPattern": "^https?://example\\.com/expected-redirect(?:[?#/].*)?$"
+}
+```
+
+The code, group, severity, and status-code selectors are optional and combine
+with AND. To suppress only HTTP 429 responses from external link checks across
+all destinations:
+
+```json
+{
+  "groups": ["External Links"],
+  "statusCodes": [429],
+  "urlPattern": ".*"
 }
 ```
 
