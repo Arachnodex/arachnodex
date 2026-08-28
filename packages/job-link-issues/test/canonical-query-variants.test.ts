@@ -25,6 +25,7 @@ type IssueLike = {
 type AssetLike = {
     targetUrl: string;
     sourceUrl: string;
+    occurrences?: unknown[];
 };
 
 type JobConfigOverrides = {
@@ -177,26 +178,38 @@ test("query-string canonical variants still audit outgoing links and assets afte
 
     assert.ok(issues(job).some(issue => issue.code === "javascript-href" && issue.sourceUrl === variantUrl));
     assert.ok(assets(job).some(asset => asset.targetUrl === `${baseUrl}/banner-3.jpg` && asset.sourceUrl === variantUrl));
-    assert.ok(job.processedPageUrls.has(variantUrl));
 });
 
-test("path-level non-canonical duplicates still skip outgoing auditing after canonical page was processed", () => {
-    const job = createJob({includeAssets: true});
+test("path-level non-canonical pages are fully audited regardless of crawl order", () => {
     const canonicalUrl = `${baseUrl}/canonical`;
     const duplicateUrl = `${baseUrl}/duplicate`;
-
-    job.onPageReceived(response, makePage({url: canonicalUrl, canonicalUrl}));
-    job.onPageReceived(response, makePage({
+    const sharedAssetUrl = `${baseUrl}/shared.jpg`;
+    const canonicalPage = () => makePage({
+        url: canonicalUrl,
+        canonicalUrl,
+        body: '<img src="/shared.jpg" alt="">'
+    });
+    const duplicatePage = () => makePage({
         url: duplicateUrl,
         canonicalUrl,
-        body: '<img src="/duplicate-only.jpg" alt="">',
+        body: '<img src="/shared.jpg" alt="">',
         rawLinks: [javascriptLink(duplicateUrl)]
-    }));
+    });
 
-    assert.ok(issues(job).some(issue => issue.code === "non-canonical-internal-link" && issue.targetUrl === duplicateUrl));
-    assert.equal(issues(job).some(issue => issue.code === "javascript-href" && issue.sourceUrl === duplicateUrl), false);
-    assert.equal(assets(job).some(asset => asset.targetUrl === `${baseUrl}/duplicate-only.jpg` && asset.sourceUrl === duplicateUrl), false);
-    assert.equal(job.processedPageUrls.has(duplicateUrl), false);
+    [
+        [canonicalPage(), duplicatePage()],
+        [duplicatePage(), canonicalPage()]
+    ].forEach(pages => {
+        const job = createJob({includeAssets: true});
+        pages.forEach(page => job.onPageReceived(response, page));
+
+        assert.ok(issues(job).some(issue => issue.code === "non-canonical-internal-link"
+            && issue.targetUrl === duplicateUrl));
+        assert.ok(issues(job).some(issue => issue.code === "javascript-href"
+            && issue.sourceUrl === duplicateUrl));
+        assert.equal(assets(job).filter(asset => asset.targetUrl === sharedAssetUrl).length, 1);
+        assert.equal(assets(job).find(asset => asset.targetUrl === sharedAssetUrl)?.occurrences?.length, 2);
+    });
 });
 
 test("canonical-query-variant notices are still reported and suppressible", () => {

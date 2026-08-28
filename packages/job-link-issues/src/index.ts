@@ -284,7 +284,6 @@ export default class LinkIssues extends BaseJob {
     redirectSources = new Map<string, Location>();
     canonicalReferences: CanonicalReference[] = [];
     nonCanonicalTargets = new Set<string>();
-    processedPageUrls = new Set<string>();
     pageAnchors = new Map<string, Set<string>>();
     fragmentRequests: FragmentRequest[] = [];
     externalLinks = new Map<string, ExternalLinkRecord>();
@@ -498,17 +497,13 @@ export default class LinkIssues extends BaseJob {
         // Page-level checks need the parsed DOM, raw links, canonical metadata, and anchors
         // gathered by core. Some cross-page checks are deferred until onEnd.
         this.scannedPageCount++;
-        const canonicalUrl = this.auditCanonical(_pageData);
-        if(this.shouldSkipOutgoingLinkAudit(_pageData, canonicalUrl)) {
-            return;
-        }
+        this.auditCanonical(_pageData);
 
         this.trackLinkOccurrences(_pageData);
         this.trackPageAnchors(_pageData);
         this.auditParseWarnings(_pageData);
         this.auditPageLinks(_pageData);
         this.collectPageAssets(_pageData);
-        this.processedPageUrls.add(_pageData.location.url);
     }
 
     async onEnd() {
@@ -3846,18 +3841,6 @@ export default class LinkIssues extends BaseJob {
         } catch {
             return false;
         }
-    }
-
-    private shouldSkipOutgoingLinkAudit(pageData: PageData, canonicalUrl: string|null): boolean {
-        if(canonicalUrl === null || canonicalUrl === pageData.location.url) {
-            return false;
-        }
-
-        if(this.isCanonicalQueryVariant(pageData.location.url, canonicalUrl)) {
-            return false;
-        }
-
-        return this.processedPageUrls.has(canonicalUrl);
     }
 
     private auditCanonicalTargets(): void {

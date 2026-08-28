@@ -93,7 +93,6 @@ export default class LinkIssues extends BaseJob {
     redirectSources: Map<string, Location>;
     canonicalReferences: CanonicalReference[];
     nonCanonicalTargets: Set<string>;
-    processedPageUrls: Set<string>;
     pageAnchors: Map<string, Set<string>>;
     fragmentRequests: FragmentRequest[];
     externalLinks: Map<string, ExternalLinkRecord>;
@@ -252,7 +251,6 @@ export default class LinkIssues extends BaseJob {
     private getHeaderText;
     private auditCanonical;
     private isCanonicalQueryVariant;
-    private shouldSkipOutgoingLinkAudit;
     private auditCanonicalTargets;
     private auditRedirects;
     private trackLinkOccurrences;
