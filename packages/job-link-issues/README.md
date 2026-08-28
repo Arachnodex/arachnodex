@@ -162,11 +162,12 @@ want the ignore to apply only to specific finding types.
 | --- | --- |
 | Crawl status | `fetch-failed`, `client-error`, `server-error` |
 | Incomplete page audits | `page-audit-incomplete` |
-| Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-chain`, `redirect-final-target-non-canonical` |
+| Unverified deferred checks | `cross-page-fragment-unverified`, `canonical-target-unverified`, `redirect-final-target-unverified` |
+| Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-final-target-unverified`, `redirect-chain`, `redirect-final-target-non-canonical` |
 | External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-bot-protection`, `external-dns-temporary-failure`, `external-fetch-failed` |
 | Asset links | `asset-redirect`, `asset-http-upgrade-available`, `asset-error`, `asset-bot-protection`, `asset-dns-temporary-failure`, `asset-fetch-failed` |
 | Asset security | `insecure-asset-url`, `iframe-missing-sandbox`, `iframe-missing-referrerpolicy`, `malformed-asset-url`, `unsupported-asset-protocol` |
-| Canonical issues | `missing-canonical`, `multiple-canonicals`, `empty-canonical`, `malformed-canonical`, `offsite-canonical`, `http-canonical`, `canonical-query-variant`, `non-canonical-internal-link`, `canonical-target-failed`, `canonical-target-redirects` |
+| Canonical issues | `missing-canonical`, `multiple-canonicals`, `empty-canonical`, `malformed-canonical`, `offsite-canonical`, `http-canonical`, `canonical-query-variant`, `non-canonical-internal-link`, `canonical-target-failed`, `canonical-target-redirects`, `canonical-target-unverified` |
 | Placeholder links | `missing-href`, `empty-href`, `hash-placeholder` |
 | Malformed links | `malformed-href`, `control-character-href` |
 | Unsafe protocols | `javascript-href`, `vbscript-href`, `non-web-protocol` |

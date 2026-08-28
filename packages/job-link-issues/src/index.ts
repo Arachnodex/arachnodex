@@ -8,6 +8,7 @@ import type {
     LinkIssueSeverity,
     LinkZone,
     Location,
+    PageAuditOutcome,
     PageData,
     PageLink,
     PageParseWarning,
@@ -159,6 +160,23 @@ type FragmentRequest = {
     zone: LinkZone;
 }
 
+type DeferredPageVerification =
+    | {
+        kind: 'html';
+        targetUrl: string;
+        anchors: Set<string>;
+    }
+    | {
+        kind: 'non-html';
+        targetUrl: string;
+    }
+    | {
+        kind: 'unverified';
+        targetUrl: string;
+        reason: string;
+        statusCode?: number;
+    };
+
 type CanonicalReference = {
     sourceUrl: string;
     canonicalUrl: string;
@@ -229,10 +247,13 @@ const reportUsingTargetOccurrencesCodes = new Set<string>([
     'client-error',
     'server-error',
     'page-audit-incomplete',
+    'missing-cross-page-fragment',
+    'cross-page-fragment-unverified',
     'canonical-query-variant',
     'non-canonical-internal-link',
     'redirect-loop',
     'redirect-final-target-failed',
+    'redirect-final-target-unverified',
     'redirect-chain',
     'redirect-final-target-non-canonical'
 ]);
@@ -254,6 +275,7 @@ const reportGroupOrder = [
     'Server Errors',
     'Failed Fetches',
     'Incomplete Page Audits',
+    'Unverified Deferred Checks',
     'Redirects',
     'External Links',
     'Asset Links',
@@ -287,6 +309,7 @@ export default class LinkIssues extends BaseJob {
     canonicalReferences: CanonicalReference[] = [];
     nonCanonicalTargets = new Set<string>();
     pageAnchors = new Map<string, Set<string>>();
+    pageAuditOutcomes = new Map<string, PageAuditOutcome>();
     fragmentRequests: FragmentRequest[] = [];
     externalLinks = new Map<string, ExternalLinkRecord>();
     assetLinks = new Map<string, AssetRecord>();
@@ -294,6 +317,7 @@ export default class LinkIssues extends BaseJob {
     scannedPageCount = 0;
     incompletePageCount = 0;
     nonHtmlResourceCount = 0;
+    unverifiedDeferredCheckCount = 0;
 
     baseUrl: string;
     baseProtocol: string;
@@ -396,6 +420,7 @@ export default class LinkIssues extends BaseJob {
             'Scanned Pages': this.scannedPageCount,
             'Incomplete Page Audits': this.incompletePageCount,
             'Confirmed Non-HTML Resources': this.nonHtmlResourceCount,
+            'Unverified Deferred Checks': this.unverifiedDeferredCheckCount,
             'Reported Issues': issues.length,
             'Grouped Findings': entries.length,
             'Errors': counts.error,
@@ -493,24 +518,37 @@ export default class LinkIssues extends BaseJob {
     }
 
     onPageReceived(_response: AxiosResponse|null, _pageData: PageData): void {
-        if(_pageData.auditOutcome?.status === 'non-html') {
+        const auditOutcome = _pageData.auditOutcome;
+        if(typeof auditOutcome !== 'undefined') {
+            this.pageAuditOutcomes.set(_pageData.location.url, auditOutcome);
+        }
+
+        const responseStatus = _pageData.location.statusCode ?? _response?.status;
+        if(typeof responseStatus === 'number' && !this.statusByUrl.has(_pageData.location.url)) {
+            this.statusByUrl.set(_pageData.location.url, {
+                status: responseStatus,
+                location: {..._pageData.location, statusCode: responseStatus}
+            });
+        }
+
+        if(auditOutcome?.status === 'non-html') {
             this.nonHtmlResourceCount++;
             return;
         }
-        if(_pageData.auditOutcome?.status === 'failed') {
+        if(auditOutcome?.status === 'failed') {
             this.incompletePageCount++;
             this.addIssue({
                 severity: 'error',
                 group: 'Incomplete Page Audits',
                 code: 'page-audit-incomplete',
-                message: `Page ${_pageData.auditOutcome.phase} failed: ${_pageData.auditOutcome.message}`,
+                message: `Page ${auditOutcome.phase} failed: ${auditOutcome.message}`,
                 targetUrl: _pageData.location.url,
                 sourceUrl: _pageData.location.referer ?? _pageData.location.url,
                 htmlSnippet: _pageData.location.htmlSnippet,
                 pageUrl: _pageData.location.url,
-                networkErrorCode: _pageData.auditOutcome.errorCode,
-                networkErrorMessage: _pageData.auditOutcome.message,
-                statusCode: _pageData.auditOutcome.statusCode,
+                networkErrorCode: auditOutcome.errorCode,
+                networkErrorMessage: auditOutcome.message,
+                statusCode: auditOutcome.statusCode,
                 zone: 'unknown'
             });
             return;
@@ -1577,6 +1615,24 @@ export default class LinkIssues extends BaseJob {
                     'These cross-page fragment links point to an id/name missing from the linked page.',
                     'Update the fragment to the target page actual id/name, add the missing anchor, or remove the fragment.',
                     'Confirm the base linked page is the intended destination before changing the fragment.'
+                ];
+            case 'cross-page-fragment-unverified':
+                return [
+                    'The linked page was not available as parsed HTML, so its fragment target could not be verified.',
+                    'Resolve the target fetch, redirect, parsing, or crawl-scope problem shown in the finding, then rerun the audit.',
+                    'Do not remove or rename the fragment solely from this inconclusive result.'
+                ];
+            case 'canonical-target-unverified':
+                return [
+                    'The crawl ended without a response status for this internal canonical target.',
+                    'Confirm the target is crawlable and not excluded by crawl scope, limits, authentication, or filtering, then rerun the audit.',
+                    'Do not treat the canonical target as healthy until it can be verified.'
+                ];
+            case 'redirect-final-target-unverified':
+                return [
+                    'The redirect destination did not produce a final response status during the crawl.',
+                    'Check the redirect chain, crawl scope, limits, authentication, and target availability, then rerun the audit.',
+                    'Update the source link only after confirming the intended stable destination.'
                 ];
             case 'target-blank-rel':
                 return [
@@ -3149,12 +3205,37 @@ export default class LinkIssues extends BaseJob {
     }
 
     private auditDeferredFragments(): void {
+        const verificationByTarget = new Map<string, DeferredPageVerification>();
         this.fragmentRequests.forEach(request => {
-            const anchors = this.pageAnchors.get(request.targetUrl);
-            if(typeof anchors === 'undefined') {
+            let verification = verificationByTarget.get(request.targetUrl);
+            if(typeof verification === 'undefined') {
+                verification = this.resolveDeferredPageVerification(request.targetUrl);
+                verificationByTarget.set(request.targetUrl, verification);
+            }
+            if(verification.kind === 'non-html') {
                 return;
             }
-            if(!anchors.has(request.fragment)) {
+            if(verification.kind === 'unverified') {
+                this.unverifiedDeferredCheckCount++;
+                this.addIssue({
+                    severity: 'warning',
+                    group: 'Unverified Deferred Checks',
+                    code: 'cross-page-fragment-unverified',
+                    message: `Cross-page fragment could not be verified: ${verification.reason}`,
+                    targetUrl: `${request.targetUrl}#${request.fragment}`,
+                    sourceUrl: request.sourceUrl,
+                    rawHref: request.rawHref,
+                    htmlSnippet: request.htmlSnippet,
+                    normalizedUrl: `${request.targetUrl}#${request.fragment}`,
+                    finalUrl: verification.targetUrl === request.targetUrl
+                        ? undefined
+                        : `${verification.targetUrl}#${request.fragment}`,
+                    statusCode: verification.statusCode,
+                    zone: request.zone
+                });
+                return;
+            }
+            if(!verification.anchors.has(request.fragment)) {
                 this.addIssue({
                     severity: 'warning',
                     group: 'Fragment Links',
@@ -3164,10 +3245,112 @@ export default class LinkIssues extends BaseJob {
                     sourceUrl: request.sourceUrl,
                     rawHref: request.rawHref,
                     htmlSnippet: request.htmlSnippet,
+                    normalizedUrl: `${request.targetUrl}#${request.fragment}`,
+                    finalUrl: verification.targetUrl === request.targetUrl
+                        ? undefined
+                        : `${verification.targetUrl}#${request.fragment}`,
                     zone: request.zone
                 });
             }
         });
+    }
+
+    private resolveDeferredPageVerification(requestedUrl: string): DeferredPageVerification {
+        let targetUrl = requestedUrl;
+        const visited = new Set<string>();
+
+        while(!visited.has(targetUrl)) {
+            visited.add(targetUrl);
+
+            const statusRecord = this.statusByUrl.get(targetUrl);
+            if(typeof statusRecord !== 'undefined'
+                && statusRecord.status >= 300
+                && statusRecord.status < 400
+            ) {
+                const redirectedTo = statusRecord.location.redirectedTo;
+                if(typeof redirectedTo !== 'string' || redirectedTo === '') {
+                    return {
+                        kind: 'unverified',
+                        targetUrl,
+                        reason: `redirect returned HTTP ${statusRecord.status} without a destination.`,
+                        statusCode: statusRecord.status
+                    };
+                }
+                targetUrl = this.normalizeDeferredTargetUrl(redirectedTo, targetUrl);
+                continue;
+            }
+
+            const anchors = this.pageAnchors.get(targetUrl);
+            if(typeof anchors !== 'undefined') {
+                return {kind: 'html', targetUrl, anchors};
+            }
+
+            const auditOutcome = this.pageAuditOutcomes.get(targetUrl);
+            if(auditOutcome?.status === 'non-html') {
+                return {kind: 'non-html', targetUrl};
+            }
+            if(auditOutcome?.status === 'failed') {
+                return {
+                    kind: 'unverified',
+                    targetUrl,
+                    reason: `${auditOutcome.phase} failed: ${auditOutcome.message}`,
+                    statusCode: auditOutcome.statusCode
+                };
+            }
+            if(auditOutcome?.status === 'complete') {
+                return {
+                    kind: 'unverified',
+                    targetUrl,
+                    reason: 'page completed but its anchors were unavailable to this job.',
+                    statusCode: statusRecord?.status
+                };
+            }
+
+            if(typeof statusRecord === 'undefined') {
+                return {
+                    kind: 'unverified',
+                    targetUrl,
+                    reason: 'target produced no crawl status or parsed page data.'
+                };
+            }
+            if(statusRecord.status === 0) {
+                return {
+                    kind: 'unverified',
+                    targetUrl,
+                    reason: 'target failed to fetch.',
+                    statusCode: statusRecord.status
+                };
+            }
+            if(statusRecord.status >= 400) {
+                return {
+                    kind: 'unverified',
+                    targetUrl,
+                    reason: `target returned HTTP ${statusRecord.status}.`,
+                    statusCode: statusRecord.status
+                };
+            }
+
+            return {
+                kind: 'unverified',
+                targetUrl,
+                reason: 'target response did not provide parsed HTML page data.',
+                statusCode: statusRecord.status
+            };
+        }
+
+        return {
+            kind: 'unverified',
+            targetUrl,
+            reason: 'redirect chain loops before reaching a verifiable page.'
+        };
+    }
+
+    private normalizeDeferredTargetUrl(value: string, baseUrl: string): string {
+        try {
+            return this.stripHash(new URL(value, baseUrl).href);
+        } catch {
+            return value.split('#', 1)[0];
+        }
     }
 
     private trackExternalLink(link: PageLink): void {
@@ -3877,6 +4060,19 @@ export default class LinkIssues extends BaseJob {
         this.canonicalReferences.forEach(reference => {
             const statusRecord = this.statusByUrl.get(reference.canonicalUrl);
             if(typeof statusRecord === 'undefined') {
+                this.unverifiedDeferredCheckCount++;
+                this.addIssue({
+                    severity: 'warning',
+                    group: 'Unverified Deferred Checks',
+                    code: 'canonical-target-unverified',
+                    message: 'Canonical target could not be verified because it produced no crawl status.',
+                    targetUrl: reference.canonicalUrl,
+                    sourceUrl: reference.sourceUrl,
+                    pageUrl: reference.sourceUrl,
+                    canonicalUrl: reference.canonicalUrl,
+                    expectedCanonicalUrl: reference.canonicalUrl,
+                    zone: 'unknown'
+                });
                 return;
             }
 
@@ -3941,6 +4137,23 @@ export default class LinkIssues extends BaseJob {
                     zone: 'unknown'
                 });
                 return;
+            }
+
+            if(typeof finalStatus !== 'number') {
+                this.unverifiedDeferredCheckCount++;
+                this.addIssue({
+                    severity: 'warning',
+                    group: 'Unverified Deferred Checks',
+                    code: 'redirect-final-target-unverified',
+                    message: 'Redirect final target could not be verified because it produced no crawl status.',
+                    targetUrl: location.url,
+                    sourceUrl: location.referer,
+                    htmlSnippet: location.htmlSnippet,
+                    finalUrl,
+                    statusCode: location.statusCode,
+                    redirectChain: cleanChain,
+                    zone: 'unknown'
+                });
             }
 
             if(typeof finalStatus === 'number' && (finalStatus === 0 || finalStatus >= 400)) {

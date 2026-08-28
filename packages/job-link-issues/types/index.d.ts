@@ -1,5 +1,5 @@
 import { type AxiosResponse } from "axios";
-import type { LinkIssueSeverity, LinkZone, Location, PageData, ReportData } from "@arachnodex/core";
+import type { LinkIssueSeverity, LinkZone, Location, PageAuditOutcome, PageData, ReportData } from "@arachnodex/core";
 import { BaseJob, OutputHelper, type ArachnodexRuntime, type JobCommandParser, type Profiler } from "@arachnodex/core";
 export { default as CommandParser } from "./cmd.js";
 type LinkIssue = {
@@ -94,6 +94,7 @@ export default class LinkIssues extends BaseJob {
     canonicalReferences: CanonicalReference[];
     nonCanonicalTargets: Set<string>;
     pageAnchors: Map<string, Set<string>>;
+    pageAuditOutcomes: Map<string, PageAuditOutcome>;
     fragmentRequests: FragmentRequest[];
     externalLinks: Map<string, ExternalLinkRecord>;
     assetLinks: Map<string, AssetRecord>;
@@ -101,6 +102,7 @@ export default class LinkIssues extends BaseJob {
     scannedPageCount: number;
     incompletePageCount: number;
     nonHtmlResourceCount: number;
+    unverifiedDeferredCheckCount: number;
     baseUrl: string;
     baseProtocol: string;
     baseHostname: string;
@@ -230,6 +232,8 @@ export default class LinkIssues extends BaseJob {
     private hasControlCharacters;
     private auditFragment;
     private auditDeferredFragments;
+    private resolveDeferredPageVerification;
+    private normalizeDeferredTargetUrl;
     private trackExternalLink;
     private auditExternalLinks;
     private auditExternalLinkWithTimeout;

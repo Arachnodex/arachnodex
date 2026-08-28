@@ -163,6 +163,18 @@ function shouldSuppressIssue(job: LinkIssues, issue: IssueLike): boolean {
     }).shouldSuppressIssue(issue);
 }
 
+function auditDeferredFragments(job: LinkIssues): void {
+    (job as unknown as {auditDeferredFragments(): void}).auditDeferredFragments();
+}
+
+function auditCanonicalTargets(job: LinkIssues): void {
+    (job as unknown as {auditCanonicalTargets(): void}).auditCanonicalTargets();
+}
+
+function auditRedirects(job: LinkIssues): void {
+    (job as unknown as {auditRedirects(): void}).auditRedirects();
+}
+
 test("query-string canonical variants still audit outgoing links and assets after canonical page was processed", () => {
     const job = createJob({includeAssets: true});
     const canonicalUrl = `${baseUrl}/`;
@@ -536,4 +548,192 @@ test("incomplete page audits are reported with all target sources and completene
     assert.equal(reportData["Scanned Pages"], 2);
     assert.equal(reportData["Incomplete Page Audits"], 1);
     assert.equal(reportData["Confirmed Non-HTML Resources"], 1);
+});
+
+test("cross-page fragment checks follow redirects to the final parsed page", () => {
+    const sourceUrl = `${baseUrl}/source`;
+    const redirectedUrl = `${baseUrl}/old-section`;
+    const finalUrl = `${baseUrl}/new-section`;
+    const fragmentUrl = `${redirectedUrl}#details`;
+    const job = createJob();
+
+    job.onPageReceived(response, makePage({
+        url: sourceUrl,
+        canonicalUrl: sourceUrl,
+        rawLinks: [pageLink({
+            rawHref: "/old-section#details",
+            referer: sourceUrl,
+            htmlSnippet: '<a href="/old-section#details">Details</a>',
+            normalizedUrl: fragmentUrl
+        })]
+    }));
+    job.onHeadersReceived({status: 302} as AxiosResponse, {
+        url: redirectedUrl,
+        rawUrl: "/old-section#details",
+        referer: sourceUrl,
+        redirectedTo: finalUrl,
+        redirectChain: [redirectedUrl, finalUrl],
+        statusCode: 302
+    });
+    job.onPageReceived(response, makePage({
+        url: finalUrl,
+        canonicalUrl: finalUrl,
+        body: '<h2 id="details">Details</h2>',
+        referer: redirectedUrl
+    }));
+
+    auditDeferredFragments(job);
+
+    assert.equal(issues(job).some(issue => issue.code === "missing-cross-page-fragment"), false);
+    assert.equal(issues(job).some(issue => issue.code === "cross-page-fragment-unverified"), false);
+});
+
+test("cross-page fragment checks report failed and unresolved targets but skip confirmed non-html targets", () => {
+    const sourceUrl = `${baseUrl}/source`;
+    const secondSourceUrl = `${baseUrl}/second-source`;
+    const failedUrl = `${baseUrl}/failed`;
+    const unresolvedUrl = `${baseUrl}/unresolved`;
+    const documentUrl = `${baseUrl}/manual.pdf`;
+    const job = createJob();
+
+    job.onPageReceived(response, makePage({
+        url: sourceUrl,
+        canonicalUrl: sourceUrl,
+        rawLinks: [
+            pageLink({
+                rawHref: "/failed#details",
+                referer: sourceUrl,
+                htmlSnippet: '<a href="/failed#details">Failed details</a>',
+                normalizedUrl: `${failedUrl}#details`
+            }),
+            pageLink({
+                rawHref: "/unresolved#details",
+                referer: sourceUrl,
+                htmlSnippet: '<a href="/unresolved#details">Unresolved details</a>',
+                normalizedUrl: `${unresolvedUrl}#details`
+            }),
+            pageLink({
+                rawHref: "/manual.pdf#page=2",
+                referer: sourceUrl,
+                htmlSnippet: '<a href="/manual.pdf#page=2">Manual page 2</a>',
+                normalizedUrl: `${documentUrl}#page=2`
+            })
+        ]
+    }));
+    job.onPageReceived(response, makePage({
+        url: secondSourceUrl,
+        canonicalUrl: secondSourceUrl,
+        rawLinks: [pageLink({
+            rawHref: "/unresolved#details",
+            referer: secondSourceUrl,
+            htmlSnippet: '<a href="/unresolved#details">Unresolved details</a>',
+            normalizedUrl: `${unresolvedUrl}#details`
+        })]
+    }));
+    job.onPageReceived(null, {
+        location: {
+            url: failedUrl,
+            rawUrl: "/failed",
+            referer: sourceUrl
+        },
+        links: [],
+        rawLinks: [],
+        parseWarnings: [],
+        contentType: "text/html",
+        auditOutcome: {
+            status: "failed",
+            phase: "body-fetch",
+            contentType: "text/html",
+            message: "GET timed out.",
+            errorCode: "ETIMEDOUT"
+        }
+    });
+    job.onPageReceived(null, {
+        location: {
+            url: documentUrl,
+            rawUrl: "/manual.pdf",
+            referer: sourceUrl
+        },
+        links: [],
+        rawLinks: [],
+        parseWarnings: [],
+        contentType: "application/pdf",
+        auditOutcome: {
+            status: "non-html",
+            contentType: "application/pdf"
+        }
+    });
+
+    auditDeferredFragments(job);
+
+    const unverifiedTargets = issues(job)
+        .filter(issue => issue.code === "cross-page-fragment-unverified")
+        .map(issue => issue.targetUrl);
+    assert.equal(unverifiedTargets.filter(targetUrl => targetUrl === `${failedUrl}#details`).length, 1);
+    assert.equal(unverifiedTargets.filter(targetUrl => targetUrl === `${unresolvedUrl}#details`).length, 2);
+    assert.equal(unverifiedTargets.includes(`${documentUrl}#page=2`), false);
+    assert.equal(issues(job).some(issue => issue.code === "missing-cross-page-fragment"), false);
+    assert.equal(job.getReportData()["Unverified Deferred Checks"], 3);
+    const html = job.getReportHtml();
+    assert.match(html, /Repeated issue: likely shared layout\/template; found on 2 of 2 scanned pages \(100%\), 2 occurrences\./);
+    assert.match(html, new RegExp(sourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(secondSourceUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("cross-page fragments distinguish a verified missing anchor from an incomplete check", () => {
+    const sourceUrl = `${baseUrl}/source`;
+    const targetUrl = `${baseUrl}/target`;
+    const job = createJob();
+
+    job.onPageReceived(response, makePage({
+        url: sourceUrl,
+        canonicalUrl: sourceUrl,
+        rawLinks: [pageLink({
+            rawHref: "/target#missing",
+            referer: sourceUrl,
+            htmlSnippet: '<a href="/target#missing">Missing section</a>',
+            normalizedUrl: `${targetUrl}#missing`
+        })]
+    }));
+    job.onPageReceived(response, makePage({
+        url: targetUrl,
+        canonicalUrl: targetUrl,
+        body: '<h2 id="present">Present section</h2>',
+        referer: sourceUrl
+    }));
+
+    auditDeferredFragments(job);
+
+    assert.ok(issues(job).some(issue => issue.code === "missing-cross-page-fragment"
+        && issue.targetUrl === `${targetUrl}#missing`));
+    assert.equal(issues(job).some(issue => issue.code === "cross-page-fragment-unverified"), false);
+});
+
+test("missing canonical and redirect final statuses produce explicit unverified findings", () => {
+    const pageUrl = `${baseUrl}/source`;
+    const canonicalUrl = `${baseUrl}/canonical`;
+    const redirectUrl = `${baseUrl}/redirect`;
+    const finalUrl = `${baseUrl}/final`;
+    const job = createJob();
+
+    job.onPageReceived(response, makePage({url: pageUrl, canonicalUrl}));
+    job.onHeadersReceived({status: 302} as AxiosResponse, {
+        url: redirectUrl,
+        rawUrl: "/redirect",
+        referer: pageUrl,
+        redirectedTo: finalUrl,
+        redirectChain: [redirectUrl, finalUrl],
+        statusCode: 302
+    });
+
+    auditCanonicalTargets(job);
+    auditRedirects(job);
+
+    assert.ok(issues(job).some(issue => issue.code === "canonical-target-unverified"
+        && issue.targetUrl === canonicalUrl
+        && issue.sourceUrl === pageUrl));
+    assert.ok(issues(job).some(issue => issue.code === "redirect-final-target-unverified"
+        && issue.targetUrl === redirectUrl
+        && issue.finalUrl === finalUrl));
+    assert.equal(job.getReportData()["Unverified Deferred Checks"], 2);
 });
