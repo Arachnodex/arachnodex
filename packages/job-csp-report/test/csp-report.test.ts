@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {stripVTControlCharacters} from "node:util";
 
 import axios from "axios";
 import {JSDOM} from "jsdom";
@@ -87,7 +88,7 @@ function captureConsole(callback: () => void): string[] {
     const original = console.log;
     const lines: string[] = [];
     console.log = (...args: unknown[]) => {
-        lines.push(args.map(String).join(" "));
+        lines.push(stripVTControlCharacters(args.map(String).join(" ")));
     };
     try {
         callback();
@@ -101,7 +102,7 @@ async function captureConsoleAsync(callback: () => Promise<void>): Promise<strin
     const original = console.log;
     const lines: string[] = [];
     console.log = (...args: unknown[]) => {
-        lines.push(args.map(String).join(" "));
+        lines.push(stripVTControlCharacters(args.map(String).join(" ")));
     };
     try {
         await callback();
