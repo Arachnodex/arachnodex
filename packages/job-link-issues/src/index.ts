@@ -223,6 +223,18 @@ const reportByRawHrefCodes = new Set<string>([
 const reportByCodeOnlyCodes = new Set<string>([
     'missing-canonical'
 ]);
+const reportUsingTargetOccurrencesCodes = new Set<string>([
+    'fetch-failed',
+    'redirect-response',
+    'client-error',
+    'server-error',
+    'canonical-query-variant',
+    'non-canonical-internal-link',
+    'redirect-loop',
+    'redirect-final-target-failed',
+    'redirect-chain',
+    'redirect-final-target-non-canonical'
+]);
 const linkIssueSeverities: LinkIssueSeverity[] = ['error', 'warning', 'notice'];
 const externalCheckConcurrency = 10;
 const externalCheckTimeoutMs = 5000;
@@ -1746,6 +1758,7 @@ export default class LinkIssues extends BaseJob {
         issues.forEach(issue => {
             const key = this.getReportKey(issue);
             const occurrenceDetails = this.getIssueOccurrenceDetails(issue);
+            const targetOccurrenceDetails = this.getTargetOccurrenceDetails(issue);
             let entry = entries.get(key);
             if(typeof entry === 'undefined') {
                 entry = {
@@ -1756,7 +1769,15 @@ export default class LinkIssues extends BaseJob {
                 };
                 entries.set(key, entry);
             }
-            if(occurrenceDetails.length > 0) {
+            if(targetOccurrenceDetails.length > 0) {
+                targetOccurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
+                occurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
+                entry.count = Math.max(
+                    entry.count,
+                    targetOccurrenceDetails.length,
+                    entry.sourceUrls.size
+                );
+            } else if(occurrenceDetails.length > 0) {
                 entry.count += occurrenceDetails.length;
                 occurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
             } else {
@@ -1798,6 +1819,14 @@ export default class LinkIssues extends BaseJob {
         }
 
         return [];
+    }
+
+    private getTargetOccurrenceDetails(issue: LinkIssue): LinkOccurrence[] {
+        if(!reportUsingTargetOccurrencesCodes.has(issue.code) || typeof issue.targetUrl !== 'string') {
+            return [];
+        }
+
+        return this.issueOccurrences.get(issue.targetUrl)?.occurrences ?? [];
     }
 
     private getGroupSort(group: string): number {

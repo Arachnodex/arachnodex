@@ -76,12 +76,14 @@ function makePage({
     url,
     canonicalUrl,
     body = "",
-    rawLinks = []
+    rawLinks = [],
+    referer = `${baseUrl}/source`
 }: {
     url: string;
     canonicalUrl: string;
     body?: string;
     rawLinks?: PageLink[];
+    referer?: string;
 }): PageData {
     const jsdom = new JSDOM(
         `<!doctype html><html><head><link rel="canonical" href="${canonicalUrl}"></head><body>${body}</body></html>`,
@@ -92,7 +94,7 @@ function makePage({
         location: {
             url,
             rawUrl: url,
-            referer: `${baseUrl}/source`,
+            referer,
             htmlSnippet: `<a href="${url}">test page</a>`
         },
         links: [],
@@ -220,6 +222,40 @@ test("canonical-query-variant notices are still reported and suppressible", () =
     suppressedJob.onPageReceived(response, makePage({url: variantUrl, canonicalUrl}));
 
     assert.equal(issues(suppressedJob).some(issue => issue.code === "canonical-query-variant"), false);
+});
+
+test("non-canonical internal links report every source page that links to the target", () => {
+    const job = createJob();
+    const pageAUrl = `${baseUrl}/products/a`;
+    const pageBUrl = `${baseUrl}/products/b`;
+    const linkedUrl = `${baseUrl}/samples/`;
+    const canonicalUrl = `${baseUrl}/samples`;
+
+    [pageAUrl, pageBUrl].forEach(pageUrl => {
+        job.onPageReceived(response, makePage({
+            url: pageUrl,
+            canonicalUrl: pageUrl,
+            rawLinks: [
+                pageLink({
+                    rawHref: "/samples/",
+                    referer: pageUrl,
+                    htmlSnippet: '<a href="/samples/">Free sample</a>',
+                    normalizedUrl: linkedUrl
+                })
+            ]
+        }));
+    });
+
+    job.onPageReceived(response, makePage({
+        url: linkedUrl,
+        canonicalUrl,
+        referer: pageAUrl
+    }));
+
+    const html = job.getReportHtml();
+    assert.match(html, /Found on 2 pages \(2 occurrences\):/);
+    assert.match(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("ignored issue patterns can target only HTTP 429 external link errors", () => {
@@ -374,4 +410,46 @@ test("target url wrapper fallback still groups plain target status issues", () =
     assert.match(html, /Wrapper link: likely nav; found on 2 of 2 scanned pages \(100%\), 2 occurrences\./);
     assert.match(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("plain target status issues report every source page below the wrapper threshold", () => {
+    const job = createJob();
+    const pageAUrl = `${baseUrl}/account`;
+    const pageBUrl = `${baseUrl}/products`;
+    const pageCUrl = `${baseUrl}/contact`;
+    const brokenUrl = `${baseUrl}/old-page`;
+
+    [pageAUrl, pageBUrl].forEach(pageUrl => {
+        job.onPageReceived(response, makePage({
+            url: pageUrl,
+            canonicalUrl: pageUrl,
+            rawLinks: [
+                pageLink({
+                    rawHref: "/old-page",
+                    referer: pageUrl,
+                    htmlSnippet: '<a href="/old-page">Old page</a>',
+                    normalizedUrl: brokenUrl,
+                    zone: "main"
+                })
+            ]
+        }));
+    });
+    job.onPageReceived(response, makePage({
+        url: pageCUrl,
+        canonicalUrl: pageCUrl
+    }));
+
+    job.onHeadersReceived({status: 404} as AxiosResponse, {
+        url: brokenUrl,
+        rawUrl: "/old-page",
+        referer: pageAUrl,
+        htmlSnippet: '<a href="/old-page">Old page</a>',
+        statusCode: 404
+    });
+
+    const html = job.getReportHtml();
+    assert.match(html, /Found on 2 pages \(2 occurrences\):/);
+    assert.match(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(html, /Wrapper link:/);
 });

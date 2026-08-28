@@ -166,6 +166,7 @@ export default class LinkIssues extends BaseJob {
     private reportLine;
     private getReportEntries;
     private getIssueOccurrenceDetails;
+    private getTargetOccurrenceDetails;
     private getGroupSort;
     private getIssueSubheading;
     private isStatusIssue;
