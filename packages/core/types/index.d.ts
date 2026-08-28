@@ -12,4 +12,5 @@ export { ConfigService } from "./services/configLoader.js";
 export { OutputHelper } from "./services/outputHelper.js";
 export { Profiler } from "./services/profiler.js";
 export { defaultRequestHeaders } from "./services/requestHeaders.js";
+export { isHtmlContentType, normalizeContentTypeHeader } from "./services/contentType.js";
 export { UrlHelper } from "./services/urlHelper.js";

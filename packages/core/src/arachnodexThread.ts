@@ -1,14 +1,38 @@
 "use strict";
 
-import type { Location } from "./definitions.ts";
-import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios';
+import type {Location, PageAuditOutcome} from "./definitions.ts";
+import axios from 'axios';
+import type {AxiosRequestConfig, AxiosResponse} from 'axios';
 import * as https from "https";
+import type {Readable} from "stream";
 import { setTimeout as sleep } from "timers/promises";
 import {OutputHelper} from "./services/outputHelper.js";
+import {isHtmlContentType, normalizeContentTypeHeader} from "./services/contentType.js";
 import {defaultRequestHeaders} from "./services/requestHeaders.js";
 import {ArachnodexRuntime} from "./runtime.js";
 
 const pollMs = 150;
+const headGetFallbackStatuses = new Set<number>([403, 405, 501]);
+
+type PageDataFetchResult =
+    | {
+        kind: 'html';
+        response: AxiosResponse<string>;
+    }
+    | {
+        kind: 'non-html';
+        response: AxiosResponse<Readable>;
+        auditOutcome: PageAuditOutcome;
+    }
+    | {
+        kind: 'failed';
+        response?: AxiosResponse<Readable>;
+        error: unknown;
+        auditOutcome: PageAuditOutcome;
+    }
+    | {
+        kind: 'aborted';
+    };
 
 export class ArachnodexThread {
 
@@ -228,18 +252,17 @@ export class ArachnodexThread {
         // emit before request event
         this.runtime.events.emit('before-request', location);
 
-        let locationFinal: Location | undefined = undefined;
-        let statusCode: number | undefined = undefined;
-        let requestPhase: 'headers'|'data' = 'headers';
+        let locationFinal: Location | undefined;
 
-        // Perform a cheap HEAD request first. Full HTML is downloaded only after headers
-        // confirm a successful HTML response.
+        // HEAD remains the inexpensive status/redirect probe. Successful URLs then use a
+        // streaming GET: HTML is buffered for jobs, while non-HTML streams are aborted as
+        // soon as their response headers arrive.
         try {
-
             const config: AxiosRequestConfig = {
                 maxRedirects: 0,
                 timeout: this.requestTimeout,
                 signal: this.runtime.abortSignal,
+                validateStatus: () => true,
                 headers: {
                     ...defaultRequestHeaders
                 }
@@ -255,59 +278,50 @@ export class ArachnodexThread {
                 }
             }
 
-            // this will throw and error for all non-successful response codes!
-            const response: AxiosResponse<void> = await axios.head<void>(location.url, config);
+            const headResponse = await axios.head<void>(location.url, config);
             if(this.runtime.aborted) {
                 return;
             }
 
-            await this.runtime.lock.forUnlock();
-            if(this.runtime.aborted) {
+            if(headGetFallbackStatuses.has(headResponse.status)) {
+                const fallbackResult = await this.fetchPageData(location, config, headResponse);
+                if(fallbackResult.kind === 'aborted') {
+                    return;
+                }
+                if(fallbackResult.kind === 'failed') {
+                    if(typeof fallbackResult.response !== 'undefined') {
+                        await this.publishHeaders(fallbackResult.response, location, visited);
+                    } else {
+                        await this.publishHeaders(headResponse, location, visited);
+                    }
+                    if(typeof fallbackResult.response === 'undefined'
+                        || (fallbackResult.response.status >= 200 && fallbackResult.response.status < 300)) {
+                        this.publishPageAuditFailure(fallbackResult, location);
+                    }
+                    return;
+                }
+
+                await this.publishHeaders(fallbackResult.response, location, visited);
+                await this.publishPageDataResult(fallbackResult, location, visited);
                 return;
             }
-            this.runtime.lock.lock();
+
+            await this.publishHeaders(headResponse, location, visited);
             locationFinal = {...location};
-            if(response?.status > 0) {
-                statusCode = locationFinal.statusCode = response.status;
-                this.runtime.events.emit('location-visited', location.url, statusCode);
+            if(headResponse.status < 200 || headResponse.status >= 300) {
+                return;
             }
-            this.runtime.lock.unlock();
 
-            this.runtime.events.emit('headers-received', response, location);
-
-            // Non-HTML resources still fire header events for jobs, but are not downloaded
-            // unless a future job capability asks the crawler to fetch additional MIME types.
-            let contentTypes:unknown = response.headers['content-type'] ?? '';
-            contentTypes = Array.isArray(contentTypes) ? contentTypes.join(' ') : String(contentTypes);
-            if(!String(contentTypes).match(/text\/html/)
-                || statusCode === undefined
-                || (statusCode < 200)
-                || (statusCode >= 300)
-            ) {
-                // todo allow jobs to specify a list mime types besides text/html
-                // todo they would like the spider to download.
-            } else {
-                // Fetch HTML data
-                config.maxRedirects = 0;
-                requestPhase = 'data';
-                const dataResponse = await axios.get(location.url, config);
-                if(this.runtime.aborted) {
-                    return;
-                }
-
-                await this.runtime.lock.forUnlock();
-                if(this.runtime.aborted) {
-                    return;
-                }
-                this.runtime.lock.lock();
-                if(typeof visited[location.url] !== 'undefined') {
-                    visited[location.url].dataReceived = true;
-                }
-                this.runtime.lock.unlock();
-
-                // Emit page data received event
-                this.runtime.events.emit('page-received', dataResponse, location);
+            const dataResult = await this.fetchPageData(location, config, headResponse);
+            if(dataResult.kind === 'aborted') {
+                return;
             }
+            if(dataResult.kind === 'failed') {
+                this.publishPageAuditFailure(dataResult, location);
+                return;
+            }
+
+            await this.publishPageDataResult(dataResult, location, visited);
 
         } catch(nonSuccessResponseError) {
             if(this.runtime.aborted) {
@@ -315,32 +329,9 @@ export class ArachnodexThread {
             }
 
             const timeoutSeconds = this.requestTimeout / 1000;
-            const noResponseMessage = requestPhase === 'data'
-                ? `URL data request failed after successful HEAD request after ${timeoutSeconds} seconds.`
-                : `The server did not respond to the request after ${timeoutSeconds} seconds.`;
+            const noResponseMessage = `The server did not respond to the HEAD request after ${timeoutSeconds} seconds.`;
 
-            // Emit non-successful status responses as 'headers-received' events
-            // Arachnodex can then decide what to do with each.
-            if (axios.isAxiosError(nonSuccessResponseError) && nonSuccessResponseError.response !== undefined) {
-                // The request was made and the server responded with a status code
-                // that falls out of the range of 2xx
-                if(statusCode === undefined) {
-                    await this.runtime.lock.forUnlock();
-                    if(this.runtime.aborted) {
-                        return;
-                    }
-                    this.runtime.lock.lock();
-                    locationFinal = {...location};
-                    if(nonSuccessResponseError.response?.status > 0) {
-                        statusCode = locationFinal.statusCode = nonSuccessResponseError.response.status;
-                        this.runtime.events.emit('location-visited', location.url, statusCode);
-                    }
-                    this.runtime.lock.unlock();
-                    this.runtime.events.emit('headers-received', nonSuccessResponseError.response, location);
-                } else {
-                    this.runtime.events.emit('error', nonSuccessResponseError, 'URL Data Request Failed', location);
-                }
-            } else if (axios.isAxiosError(nonSuccessResponseError) && nonSuccessResponseError.request !== undefined) {
+            if (axios.isAxiosError(nonSuccessResponseError) && nonSuccessResponseError.request !== undefined) {
                 // The request was made but no response was received
                 // `error.request` is an instance of XMLHttpRequest in the browser and an instance of
                 // http.ClientRequest in node.js
@@ -389,6 +380,205 @@ export class ArachnodexThread {
             // Emit ready status to receive URL for next location
             this.runtime.events.emit('thread-ready', this);
         }
+    }
+
+    private async publishHeaders(
+        response: AxiosResponse,
+        location: Location,
+        visited: Record<string, Location>
+    ): Promise<void> {
+        await this.runtime.lock.forUnlock();
+        if(this.runtime.aborted) {
+            return;
+        }
+
+        this.runtime.lock.lock();
+        try {
+            location.statusCode = response.status;
+            if(typeof visited[location.url] !== 'undefined') {
+                visited[location.url].statusCode = response.status;
+            }
+            this.runtime.events.emit('location-visited', location.url, response.status);
+        } finally {
+            this.runtime.lock.unlock();
+        }
+
+        this.runtime.events.emit('headers-received', response, location);
+    }
+
+    private async publishPageDataResult(
+        result: Exclude<PageDataFetchResult, {kind: 'failed'|'aborted'}>,
+        location: Location,
+        visited: Record<string, Location>
+    ): Promise<void> {
+        if(result.kind === 'non-html') {
+            this.runtime.events.emit('page-received', null, location, result.auditOutcome);
+            return;
+        }
+
+        await this.runtime.lock.forUnlock();
+        if(this.runtime.aborted) {
+            return;
+        }
+        this.runtime.lock.lock();
+        try {
+            if(typeof visited[location.url] !== 'undefined') {
+                visited[location.url].dataReceived = true;
+            }
+        } finally {
+            this.runtime.lock.unlock();
+        }
+
+        this.runtime.events.emit('page-received', result.response, location);
+    }
+
+    private publishPageAuditFailure(
+        result: Extract<PageDataFetchResult, {kind: 'failed'}>,
+        location: Location
+    ): void {
+        this.runtime.events.emit('page-received', null, location, result.auditOutcome);
+        this.runtime.events.emit(
+            'error',
+            result.error,
+            'URL Data Request Failed',
+            location,
+            false,
+            false
+        );
+    }
+
+    private async fetchPageData(
+        location: Location,
+        config: AxiosRequestConfig,
+        headerResponse: AxiosResponse
+    ): Promise<PageDataFetchResult> {
+        const fallbackContentType = normalizeContentTypeHeader(headerResponse.headers['content-type']);
+        let lastError: unknown = new Error('GET request did not complete.');
+        let lastResponse: AxiosResponse<Readable>|undefined;
+
+        for(let attempt = 0; attempt <= this.requestTimeoutMaxRetries; attempt++) {
+            if(this.runtime.aborted) {
+                return {kind: 'aborted'};
+            }
+
+            let response: AxiosResponse<Readable>|undefined;
+            try {
+                response = await axios.get<Readable>(location.url, {
+                    ...config,
+                    responseType: 'stream',
+                    validateStatus: () => true
+                });
+                lastResponse = response;
+                const contentType = normalizeContentTypeHeader(response.headers['content-type']);
+
+                if(response.status < 200 || response.status >= 300) {
+                    response.data.destroy();
+                    lastError = new Error(`GET request returned HTTP ${response.status}.`);
+                } else if(!isHtmlContentType(contentType)) {
+                    // The request reached response headers, but confirmed non-HTML bodies are
+                    // never buffered. Destroying the stream keeps document checks inexpensive.
+                    response.data.destroy();
+                    return {
+                        kind: 'non-html',
+                        response,
+                        auditOutcome: {
+                            status: 'non-html',
+                            contentType,
+                            lastModified: this.getHeaderString(response.headers['last-modified'])
+                        }
+                    };
+                } else {
+                    const body = await this.readResponseStream(response.data);
+                    return {
+                        kind: 'html',
+                        response: {
+                            ...response,
+                            data: body.toString('utf8')
+                        }
+                    };
+                }
+            } catch(e) {
+                response?.data.destroy();
+                lastResponse = response;
+                lastError = e;
+            }
+
+            if(!this.shouldRetryDataFailure(lastError, lastResponse, attempt)) {
+                break;
+            }
+
+            const retryNumber = attempt + 1;
+            this.console.log(
+                `Page body request failed: ${location.url}; `
+                    + `retrying ${retryNumber}/${this.requestTimeoutMaxRetries}.`,
+                'yellow'
+            );
+            await this.sleep(Math.min(1000, pollMs * retryNumber));
+        }
+
+        const responseContentType = normalizeContentTypeHeader(lastResponse?.headers['content-type']);
+        const contentType = responseContentType !== '' ? responseContentType : fallbackContentType;
+        const errorCode = axios.isAxiosError(lastError) && typeof lastError.code === 'string'
+            ? lastError.code
+            : undefined;
+        return {
+            kind: 'failed',
+            response: lastResponse,
+            error: lastError,
+            auditOutcome: {
+                status: 'failed',
+                phase: 'body-fetch',
+                contentType,
+                message: lastError instanceof Error ? lastError.message : String(lastError),
+                errorCode,
+                statusCode: lastResponse?.status
+            }
+        };
+    }
+
+    private shouldRetryDataFailure(
+        error: unknown,
+        response: AxiosResponse|undefined,
+        attempt: number
+    ): boolean {
+        if(attempt >= this.requestTimeoutMaxRetries) {
+            return false;
+        }
+        if(typeof response === 'undefined' || (response.status >= 200 && response.status < 300)) {
+            return true;
+        }
+
+        return response.status === 408
+            || response.status === 425
+            || response.status === 429
+            || response.status >= 500
+            || this.isTimeoutError(error);
+    }
+
+    private async readResponseStream(stream: Readable): Promise<Buffer> {
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) {
+            const value: unknown = chunk;
+            if(Buffer.isBuffer(value)) {
+                chunks.push(Buffer.from(value));
+            } else if(value instanceof Uint8Array || typeof value === 'string') {
+                chunks.push(Buffer.from(value));
+            } else {
+                throw new TypeError('Response stream returned an unsupported chunk type.');
+            }
+        }
+        return Buffer.concat(chunks);
+    }
+
+    private getHeaderString(value: unknown): string|undefined {
+        if(typeof value === 'string') {
+            return value;
+        }
+        if(Array.isArray(value)) {
+            const strings = value.filter((entry): entry is string => typeof entry === 'string');
+            return strings.length > 0 ? strings.join(', ') : undefined;
+        }
+        return undefined;
     }
 
     private isTimeoutError(e: unknown): boolean {

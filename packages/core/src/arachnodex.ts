@@ -8,7 +8,8 @@ import type {
     CrawlerStats,
     PageLink,
     PageParseWarning,
-    LinkZone
+    LinkZone,
+    PageAuditOutcome
 } from "./definitions.ts";
 
 // Internal packages and helpers
@@ -19,6 +20,7 @@ import type {MainCommandParser} from "./command/mainCommandParser.js";
 import {Profiler} from "./services/profiler.js";
 import {ReportManager} from "./services/reportManager.js";
 import {ArachnodexRuntime} from "./runtime.js";
+import {isHtmlContentType, normalizeContentTypeHeader} from "./services/contentType.js";
 
 // External deps
 import type {AxiosResponse} from "axios";
@@ -783,7 +785,11 @@ export class Arachnodex {
         this.jobs.dispatchEvent('onHeadersReceived', response, location);
     }
 
-    pageReceivedEvent(response: AxiosResponse|null, location: Location): void {
+    pageReceivedEvent(
+        response: AxiosResponse|null,
+        location: Location,
+        auditOutcome?: PageAuditOutcome
+    ): void {
         if(!this.isLocationInScope(location)) {
             return;
         }
@@ -795,7 +801,8 @@ export class Arachnodex {
             links: [],
             rawLinks: [],
             parseWarnings: [],
-            contentType: ''
+            contentType: auditOutcome?.contentType ?? '',
+            auditOutcome
         };
 
         if(response) {
@@ -804,16 +811,14 @@ export class Arachnodex {
 
             // Scrape page for links to queue
             const contentTypeHeader: unknown = response.headers['content-type'] ?? '';
-            pageData.contentType = Array.isArray(contentTypeHeader)
-                ? contentTypeHeader.join(' ')
-                : (typeof contentTypeHeader === 'string' ? contentTypeHeader : '');
+            pageData.contentType = normalizeContentTypeHeader(contentTypeHeader);
 
             // todo - count how many requested resources were not downloaded due to mime type & redirect (separately)
 
             this.stats.totals.downloadedData++;
             this.stats.logs.downloadedData.push(location.url);
 
-            if (pageData.contentType.match(/text\/html/)) {
+            if (isHtmlContentType(pageData.contentType)) {
 
                 this.stats.totals.pagesScraped++;
                 this.stats.logs.pagesScraped.push(location.url);
@@ -903,9 +908,20 @@ export class Arachnodex {
                     });
 
                     pageData.jsdom = document;
+                    pageData.auditOutcome = {
+                        status: 'complete',
+                        contentType: pageData.contentType
+                    };
 
                 } catch (e) {
                     const message = "An Error occurred while parsing page data!";
+                    pageData.auditOutcome = {
+                        status: 'failed',
+                        phase: 'parse',
+                        contentType: pageData.contentType,
+                        message: e instanceof Error ? e.message : String(e),
+                        statusCode: response.status
+                    };
                     this.runtime.events.emit('error', e, message, location);
                 }
             }

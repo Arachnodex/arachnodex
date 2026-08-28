@@ -54,12 +54,32 @@ export type PageLink = {
     parseWarnings?: PageParseWarning[];
 }
 
+export type PageAuditOutcome =
+    | {
+        status: 'complete';
+        contentType: string;
+    }
+    | {
+        status: 'non-html';
+        contentType: string;
+        lastModified?: string;
+    }
+    | {
+        status: 'failed';
+        phase: 'body-fetch'|'parse';
+        contentType: string;
+        message: string;
+        errorCode?: string;
+        statusCode?: number;
+    };
+
 export type PageData = {
     location: Location;
     links: string[];
     rawLinks: PageLink[];
     parseWarnings: PageParseWarning[];
     contentType: string;
+    auditOutcome?: PageAuditOutcome;
     canonical?: Location;
     jsdom?:never;
 }

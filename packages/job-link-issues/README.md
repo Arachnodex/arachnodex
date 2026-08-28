@@ -161,6 +161,7 @@ want the ignore to apply only to specific finding types.
 | Area | Codes |
 | --- | --- |
 | Crawl status | `fetch-failed`, `client-error`, `server-error` |
+| Incomplete page audits | `page-audit-incomplete` |
 | Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-chain`, `redirect-final-target-non-canonical` |
 | External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-bot-protection`, `external-dns-temporary-failure`, `external-fetch-failed` |
 | Asset links | `asset-redirect`, `asset-http-upgrade-available`, `asset-error`, `asset-bot-protection`, `asset-dns-temporary-failure`, `asset-fetch-failed` |

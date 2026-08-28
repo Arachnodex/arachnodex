@@ -228,6 +228,7 @@ const reportUsingTargetOccurrencesCodes = new Set<string>([
     'redirect-response',
     'client-error',
     'server-error',
+    'page-audit-incomplete',
     'canonical-query-variant',
     'non-canonical-internal-link',
     'redirect-loop',
@@ -252,6 +253,7 @@ const reportGroupOrder = [
     'Client Errors',
     'Server Errors',
     'Failed Fetches',
+    'Incomplete Page Audits',
     'Redirects',
     'External Links',
     'Asset Links',
@@ -290,6 +292,8 @@ export default class LinkIssues extends BaseJob {
     assetLinks = new Map<string, AssetRecord>();
     scannedAssetBodies = new Set<string>();
     scannedPageCount = 0;
+    incompletePageCount = 0;
+    nonHtmlResourceCount = 0;
 
     baseUrl: string;
     baseProtocol: string;
@@ -390,6 +394,8 @@ export default class LinkIssues extends BaseJob {
 
         return {
             'Scanned Pages': this.scannedPageCount,
+            'Incomplete Page Audits': this.incompletePageCount,
+            'Confirmed Non-HTML Resources': this.nonHtmlResourceCount,
             'Reported Issues': issues.length,
             'Grouped Findings': entries.length,
             'Errors': counts.error,
@@ -487,6 +493,28 @@ export default class LinkIssues extends BaseJob {
     }
 
     onPageReceived(_response: AxiosResponse|null, _pageData: PageData): void {
+        if(_pageData.auditOutcome?.status === 'non-html') {
+            this.nonHtmlResourceCount++;
+            return;
+        }
+        if(_pageData.auditOutcome?.status === 'failed') {
+            this.incompletePageCount++;
+            this.addIssue({
+                severity: 'error',
+                group: 'Incomplete Page Audits',
+                code: 'page-audit-incomplete',
+                message: `Page ${_pageData.auditOutcome.phase} failed: ${_pageData.auditOutcome.message}`,
+                targetUrl: _pageData.location.url,
+                sourceUrl: _pageData.location.referer ?? _pageData.location.url,
+                htmlSnippet: _pageData.location.htmlSnippet,
+                pageUrl: _pageData.location.url,
+                networkErrorCode: _pageData.auditOutcome.errorCode,
+                networkErrorMessage: _pageData.auditOutcome.message,
+                statusCode: _pageData.auditOutcome.statusCode,
+                zone: 'unknown'
+            });
+            return;
+        }
         if(!_response || typeof _pageData.jsdom === 'undefined') {
             return;
         }

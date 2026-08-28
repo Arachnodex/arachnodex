@@ -466,3 +466,74 @@ test("plain target status issues report every source page below the wrapper thre
     assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.doesNotMatch(html, /Wrapper link:/);
 });
+
+test("incomplete page audits are reported with all target sources and completeness counts", () => {
+    const job = createJob();
+    const pageAUrl = `${baseUrl}/products/a`;
+    const pageBUrl = `${baseUrl}/products/b`;
+    const failedUrl = `${baseUrl}/failed-page`;
+    const documentUrl = `${baseUrl}/manual.pdf`;
+
+    [pageAUrl, pageBUrl].forEach(pageUrl => {
+        job.onPageReceived(response, makePage({
+            url: pageUrl,
+            canonicalUrl: pageUrl,
+            rawLinks: [
+                pageLink({
+                    rawHref: "/failed-page",
+                    referer: pageUrl,
+                    htmlSnippet: '<a href="/failed-page">Failed page</a>',
+                    normalizedUrl: failedUrl
+                })
+            ]
+        }));
+    });
+
+    job.onPageReceived(null, {
+        location: {
+            url: failedUrl,
+            rawUrl: "/failed-page",
+            referer: pageAUrl,
+            htmlSnippet: '<a href="/failed-page">Failed page</a>'
+        },
+        links: [],
+        rawLinks: [],
+        parseWarnings: [],
+        contentType: "text/html",
+        auditOutcome: {
+            status: "failed",
+            phase: "body-fetch",
+            contentType: "text/html",
+            message: "GET request returned HTTP 503.",
+            statusCode: 503
+        }
+    });
+    job.onPageReceived(null, {
+        location: {
+            url: documentUrl,
+            rawUrl: "/manual.pdf",
+            referer: pageAUrl
+        },
+        links: [],
+        rawLinks: [],
+        parseWarnings: [],
+        contentType: "application/pdf",
+        auditOutcome: {
+            status: "non-html",
+            contentType: "application/pdf"
+        }
+    });
+
+    assert.ok(issues(job).some(issue => issue.code === "page-audit-incomplete"
+        && issue.targetUrl === failedUrl
+        && issue.statusCode === 503));
+    const html = job.getReportHtml();
+    assert.match(html, /Repeated issue: likely shared layout\/template; found on 2 of 2 scanned pages \(100%\), 2 occurrences\./);
+    assert.match(html, new RegExp(pageAUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, new RegExp(pageBUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+    const reportData = job.getReportData();
+    assert.equal(reportData["Scanned Pages"], 2);
+    assert.equal(reportData["Incomplete Page Audits"], 1);
+    assert.equal(reportData["Confirmed Non-HTML Resources"], 1);
+});

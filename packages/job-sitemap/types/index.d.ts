@@ -4,6 +4,10 @@ import type { FileHandle } from 'fs/promises';
 import { BaseJob, type ArachnodexRuntime, type JobCommandParser, type Profiler } from "@arachnodex/core";
 import { StreamWriter } from "./streamWriter.js";
 export { default as CommandParser } from "./cmd.js";
+type HeaderDocumentCandidate = {
+    location: Location;
+    lastModifiedHeader: string;
+};
 export default class Sitemap extends BaseJob {
     name: string;
     configRequired: boolean;
@@ -18,6 +22,9 @@ export default class Sitemap extends BaseJob {
     pageUrlCount: number;
     docUrlCount: number;
     loggedUrls: string[];
+    headerLastModifiedByUrl: Map<string, string>;
+    headerDocumentCandidates: Map<string, HeaderDocumentCandidate>;
+    bodyClassifiedUrls: Set<string>;
     constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime);
     loadConfig(): void;
     onInit(): void;
@@ -30,6 +37,9 @@ export default class Sitemap extends BaseJob {
     getReportMessage(): string;
     getReportData(): ReportData;
     onEnd(): Promise<void>;
+    private getContentTypeHeader;
+    private matchesIncludeDocPattern;
+    private addUnresolvedHeaderDocuments;
     pipeData(writer: FileHandle, readFile: string): Promise<void>;
     removeFile(filePath: string): void;
     private cleanupTempFiles;

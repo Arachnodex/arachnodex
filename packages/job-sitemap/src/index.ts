@@ -4,7 +4,13 @@ import type {PageData, Location, JSONObject, ReportData} from "@arachnodex/core"
 import type {AxiosResponse} from "axios";
 import type {FileHandle} from 'fs/promises';
 
-import {BaseJob, type ArachnodexRuntime, type JobCommandParser, type Profiler} from "@arachnodex/core";
+import {
+    BaseJob,
+    isHtmlContentType,
+    type ArachnodexRuntime,
+    type JobCommandParser,
+    type Profiler
+} from "@arachnodex/core";
 import {open} from 'fs/promises'
 import fse from 'fs-extra'
 import {tmpdir} from "os";
@@ -20,6 +26,11 @@ interface SitemapConfig extends JSONObject {
     outputFile: string;
     includeDocPattern?: string;
 }
+
+type HeaderDocumentCandidate = {
+    location: Location;
+    lastModifiedHeader: string;
+};
 
 export default class Sitemap extends BaseJob {
 
@@ -45,6 +56,9 @@ export default class Sitemap extends BaseJob {
 
     // Keep track of URLS so that no duplicated URL is added.
     loggedUrls: string[] = [];
+    headerLastModifiedByUrl = new Map<string, string>();
+    headerDocumentCandidates = new Map<string, HeaderDocumentCandidate>();
+    bodyClassifiedUrls = new Set<string>();
 
     constructor(handle: string, command: JobCommandParser, profiler: Profiler, runtime: ArachnodexRuntime) {
         super(handle, command, profiler, runtime);
@@ -65,7 +79,7 @@ export default class Sitemap extends BaseJob {
         this.includeDocs = config.includeDocs;
         this.emailReportEnabled = config.emailReportEnabled;
         this.outputFile = config.outputFile;
-        this.includeDocPattern = new RegExp(config.includeDocPattern ?? '', 'gi');
+        this.includeDocPattern = new RegExp(config.includeDocPattern ?? '', 'i');
     }
 
     onInit() {
@@ -101,28 +115,51 @@ export default class Sitemap extends BaseJob {
 
     onHeadersReceived(_response: AxiosResponse | null, _location: Location) {
 
-        // Non-HTML files are not usually downloaded, so add matching documents here if the
-        // mime type matches our includeDocPattern and includeDocs is enabled in the settings.
-        // The loggedUrls check prevents duplicate entries if another path sees the same URL.
+        // HEAD remains useful as a compatibility fallback, but GET now supplies the
+        // authoritative body content type. Hold matching HEAD candidates until onEnd so a
+        // later GET can reclassify a misleading response before anything is written.
 
         // Guard clause - Only process success status codes if include docs is enabled.
         if(_response === null) { return; }
         if(!this.includeDocs || _response.status < 200 || _response.status >= 300) return;
 
-        let contentTypes:unknown = _response.headers['content-type'] ?? '';
-        contentTypes = Array.isArray(contentTypes) ? contentTypes.join(' ') : String(contentTypes);
-        if(String(contentTypes).match(this.includeDocPattern)) {
-            this.addLocation(_location, this.getLastModifiedHeader(_response), true);
+        const lastModifiedHeader = this.getLastModifiedHeader(_response);
+        this.headerLastModifiedByUrl.set(_location.url, lastModifiedHeader);
+        if(this.matchesIncludeDocPattern(this.getContentTypeHeader(_response))) {
+            this.headerDocumentCandidates.set(_location.url, {
+                location: {..._location},
+                lastModifiedHeader
+            });
         }
     }
 
 
 
     onPageReceived(_response: AxiosResponse | null, _pageData: PageData) {
+        const pageUrl = _pageData.location.url;
+        if(typeof _pageData.auditOutcome !== 'undefined') {
+            this.bodyClassifiedUrls.add(pageUrl);
+            if(_pageData.auditOutcome.status === 'non-html') {
+                if(this.includeDocs && this.matchesIncludeDocPattern(_pageData.auditOutcome.contentType)) {
+                    this.addLocation(
+                        _pageData.location,
+                        _pageData.auditOutcome.lastModified
+                            ?? this.headerLastModifiedByUrl.get(pageUrl)
+                            ?? '',
+                        true
+                    );
+                }
+                return;
+            }
+            if(_pageData.auditOutcome.status === 'failed') {
+                return;
+            }
+        }
         if(_response === null) { return; }
+        this.bodyClassifiedUrls.add(pageUrl);
 
         // Content Type Guard Clause
-        if (!_pageData.contentType.match(/text\/html/)) return;
+        if(!isHtmlContentType(_pageData.contentType)) return;
 
         // When canonical-only mode is enabled, skip alternate URLs that point at a different
         // canonical target. This keeps the sitemap aligned with the site's preferred URLs.
@@ -209,6 +246,10 @@ export default class Sitemap extends BaseJob {
 
     async onEnd() {
 
+        // Older cores may never emit a body classification for non-HTML URLs. Preserve
+        // includeDocPattern behavior by writing only HEAD candidates that GET did not resolve.
+        this.addUnresolvedHeaderDocuments();
+
         // Flush temp writers before merging so all buffered URLs are present on disk.
         await this.pageWriter?.terminate();
         await this.docWriter?.terminate();
@@ -255,6 +296,29 @@ export default class Sitemap extends BaseJob {
             this.cleanupTempFiles();
         }
 
+    }
+
+    private getContentTypeHeader(response: AxiosResponse): string {
+        const value: unknown = response.headers['content-type'] ?? '';
+        if(typeof value === 'string') {
+            return value;
+        }
+        if(Array.isArray(value)) {
+            return value.filter((entry): entry is string => typeof entry === 'string').join(' ');
+        }
+        return '';
+    }
+
+    private matchesIncludeDocPattern(contentType: string): boolean {
+        return this.includeDocPattern.test(contentType);
+    }
+
+    private addUnresolvedHeaderDocuments(): void {
+        this.headerDocumentCandidates.forEach((candidate, url) => {
+            if(!this.bodyClassifiedUrls.has(url)) {
+                this.addLocation(candidate.location, candidate.lastModifiedHeader, true);
+            }
+        });
     }
 
     async pipeData(writer: FileHandle, readFile: string) {

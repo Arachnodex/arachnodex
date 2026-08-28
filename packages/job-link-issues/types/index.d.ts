@@ -99,6 +99,8 @@ export default class LinkIssues extends BaseJob {
     assetLinks: Map<string, AssetRecord>;
     scannedAssetBodies: Set<string>;
     scannedPageCount: number;
+    incompletePageCount: number;
+    nonHtmlResourceCount: number;
     baseUrl: string;
     baseProtocol: string;
     baseHostname: string;

@@ -66,7 +66,7 @@ Default config:
 | `includeDocs` | boolean | `true` | Include matching non-HTML document URLs discovered from successful response headers. |
 | `emailReportEnabled` | boolean | `true` | Include the Sitemap job summary in Arachnodex report emails. |
 | `outputFile` | string | `"../web/sitemap.xml"` | Path for the generated sitemap file, resolved from the directory where the crawler is run. The default assumes the Arachnodex project sits beside a website document root at `../web`. |
-| `includeDocPattern` | string | `"((x-)?pdf)|(ms-?excel)|(vnd.)|(ms-?word)|(ms-?powerpoint)|(ms-?access)|(download)"` | Regular expression used against response `content-type` headers when `includeDocs` is enabled. Matching URLs are written as document entries. |
+| `includeDocPattern` | string | `"((x-)?pdf)|(ms-?excel)|(vnd.)|(ms-?word)|(ms-?powerpoint)|(ms-?access)|(download)"` | Regular expression used against the authoritative GET `content-type` when `includeDocs` is enabled, with matching HEAD values retained as a compatibility fallback. Matching URLs are written once as document entries. |
 
 ## Output Path
 

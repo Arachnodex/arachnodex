@@ -1,4 +1,4 @@
-import type { Location, CrawlerError, CrawlerStats } from "./definitions.ts";
+import type { Location, CrawlerError, CrawlerStats, PageAuditOutcome } from "./definitions.ts";
 import { ArachnodexThread } from "./arachnodexThread.js";
 import { OutputHelper } from "./services/outputHelper.js";
 import { JobManager } from "./services/jobManager.js";
@@ -47,7 +47,7 @@ export declare class Arachnodex {
     threadReadyEvent(thread: ArachnodexThread): Promise<void>;
     beforeRequestEvent(location: Location): void;
     headersReceivedEvent(response: AxiosResponse | null, location: Location): void;
-    pageReceivedEvent(response: AxiosResponse | null, location: Location): void;
+    pageReceivedEvent(response: AxiosResponse | null, location: Location, auditOutcome?: PageAuditOutcome): void;
     private registerCanonicalAlias;
     private isCanonicalAliasAlreadyProcessed;
     private getPreparedLocationUrl;

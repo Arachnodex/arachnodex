@@ -11,6 +11,13 @@ export declare class ArachnodexThread {
     constructor(index: number, runtime?: ArachnodexRuntime);
     waitTurn(): Promise<void>;
     fetch(location: Location, visited: Record<string, Location>): Promise<void>;
+    private publishHeaders;
+    private publishPageDataResult;
+    private publishPageAuditFailure;
+    private fetchPageData;
+    private shouldRetryDataFailure;
+    private readResponseStream;
+    private getHeaderString;
     private isTimeoutError;
     private shouldRetryTimeout;
     private sleep;

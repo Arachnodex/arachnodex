@@ -1,6 +1,6 @@
 // App Bootstrap
 "use strict";
-import type {Location} from "./definitions.ts";
+import type {Location, PageAuditOutcome} from "./definitions.ts";
 import type {AxiosResponse} from "axios";
 import type {ArachnodexThread} from "./arachnodexThread.js";
 import { Arachnodex } from './arachnodex.js';
@@ -65,9 +65,13 @@ export async function runApp(args: string[] = process.argv.slice(2), runtime = n
             }
         });
 
-        events.on("page-received", (response: AxiosResponse | null, location: Location) => {
+        events.on("page-received", (
+            response: AxiosResponse | null,
+            location: Location,
+            auditOutcome?: PageAuditOutcome
+        ) => {
             try {
-                arachnodex.pageReceivedEvent(response, location);
+                arachnodex.pageReceivedEvent(response, location, auditOutcome);
             } catch (err) {
                 events.emit('error', err, 'pageReceivedEvent failed:', undefined, false, true);
             }
