@@ -48,6 +48,17 @@ function assertAppConfig(v: unknown): asserts v is AppConfigInput {
     if (typeof v.requestDelayMs !== 'undefined' && typeof v.requestDelayMs !== 'number') throw new Error('requestDelayMs must be number');
     if (typeof v.requestTimeoutMs !== 'undefined' && typeof v.requestTimeoutMs !== 'number') throw new Error('requestTimeoutMs must be number');
     if (typeof v.requestTimeoutMaxRetries !== 'undefined' && typeof v.requestTimeoutMaxRetries !== 'number') throw new Error('requestTimeoutMaxRetries must be number');
+    if (typeof v.requestHead !== 'undefined') {
+        if (!isRecord(v.requestHead)) throw new Error('requestHead must be object');
+        if (typeof v.requestHead.enabled !== 'undefined' && typeof v.requestHead.enabled !== 'boolean') {
+            throw new Error('requestHead.enabled must be boolean');
+        }
+        if (typeof v.requestHead.failureWarningIgnorePatterns !== 'undefined'
+            && (!Array.isArray(v.requestHead.failureWarningIgnorePatterns)
+                || !v.requestHead.failureWarningIgnorePatterns.every(x => typeof x === 'string'))) {
+            throw new Error('requestHead.failureWarningIgnorePatterns must be string[]');
+        }
+    }
     if (typeof v.requestTls !== 'undefined') {
         if (!isRecord(v.requestTls)) throw new Error('requestTls must be object');
         if (typeof v.requestTls.rejectUnauthorized !== 'undefined'
@@ -160,6 +171,10 @@ export class ConfigLoader {
             requestDelayMs: 0,
             requestTimeoutMs: 30000,
             requestTimeoutMaxRetries: 3,
+            requestHead: {
+                enabled: true,
+                failureWarningIgnorePatterns: []
+            },
             requestTls: {
                 rejectUnauthorized: true
             },
@@ -214,6 +229,10 @@ export class ConfigLoader {
             let appConfig: AppConfig = {
                 ...defaults,
                 ...fileCfg,
+                requestHead: {
+                    ...defaults.requestHead,
+                    ...(isRecord(fileCfg.requestHead) ? fileCfg.requestHead : {})
+                },
                 requestTls: {
                     ...defaults.requestTls,
                     ...(isRecord(fileCfg.requestTls) ? fileCfg.requestTls : {})

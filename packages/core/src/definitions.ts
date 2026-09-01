@@ -31,6 +31,11 @@ export interface RequestTlsConfig extends JSONObject {
     rejectUnauthorized: boolean;
 }
 
+export interface RequestHeadConfig extends JSONObject {
+    enabled: boolean;
+    failureWarningIgnorePatterns: string[];
+}
+
 export interface MailConfig {
     disabled: boolean;
     defaultSubject: string;
@@ -53,6 +58,7 @@ export interface AppConfig {
     requestDelayMs: number;
     requestTimeoutMs: number;
     requestTimeoutMaxRetries: number;
+    requestHead: RequestHeadConfig;
     requestTls: RequestTlsConfig;
     muteResponseStatus: boolean;
     muteAll: boolean;
@@ -87,6 +93,12 @@ export type CrawlerError = {
     fatal?: boolean;
 }
 
+export type HeadRequestFailure = {
+    message: string;
+    statusCode?: number;
+    errorCode?: string;
+}
+
 export type Location = {
     url: string;
     rawUrl: string;
@@ -102,6 +114,7 @@ export type Location = {
     hash?: string;
     queryString?: string;
     statusCode?: number;
+    headRequestFailure?: HeadRequestFailure;
     dataReceived?: boolean;
     retryAttempt?: number;
 }

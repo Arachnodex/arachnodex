@@ -600,8 +600,10 @@ export class Arachnodex {
 
                         // Dispatch location to worker
                         void thread.fetch(location, this.visited);
-                        this.stats.totals.requestedHead++;
-                        this.stats.logs.requestedHead.push(location.url);
+                        if(thread.requestHeadEnabled) {
+                            this.stats.totals.requestedHead++;
+                            this.stats.logs.requestedHead.push(location.url);
+                        }
                     }
                 }
 
@@ -703,8 +705,10 @@ export class Arachnodex {
             void thread.fetch(location, this.visited);
 
             // Logging
-            this.stats.totals.requestedHead++;
-            this.stats.logs.requestedHead.push(location.url);
+            if(thread.requestHeadEnabled) {
+                this.stats.totals.requestedHead++;
+                this.stats.logs.requestedHead.push(location.url);
+            }
         } else {
             this.runtime.activeThreads.delete(thread);
             this.threadCount--;

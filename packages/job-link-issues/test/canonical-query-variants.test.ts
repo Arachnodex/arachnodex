@@ -22,12 +22,20 @@ type IssueLike = {
     assetKind?: string;
     sourceLabel?: string;
     statusCode?: number;
+    headStatusCode?: number;
+    fallbackGetStatusCode?: number;
 };
 
 type AssetLike = {
     targetUrl: string;
     sourceUrl: string;
     occurrences?: unknown[];
+};
+
+type ReportEntryLike = {
+    issue: IssueLike;
+    count: number;
+    sourceUrls: Set<string>;
 };
 
 type JobConfigOverrides = {
@@ -65,14 +73,19 @@ test("version output matches the package manifest", () => {
 
 function createJob({
     includeAssets = false,
-    configOverrides = {}
+    configOverrides = {},
+    headFailureIgnorePatterns = []
 }: {
     includeAssets?: boolean;
     configOverrides?: JobConfigOverrides;
+    headFailureIgnorePatterns?: string[];
 } = {}): LinkIssues {
     const config = {
         getConfigBoolean: () => false,
         getConfigString: (key: string) => key === "baseUrl" ? baseUrl : "",
+        getConfigRegExArray: (key: string) => key === "requestHead.failureWarningIgnorePatterns"
+            ? headFailureIgnorePatterns.map(pattern => new RegExp(pattern))
+            : [],
         getJobConfig: <T extends Record<string, unknown>>(defaults: T): T => ({
             ...defaults,
             ...configOverrides
@@ -195,6 +208,46 @@ function auditCanonicalTargets(job: LinkIssues): void {
 
 function auditRedirects(job: LinkIssues): void {
     (job as unknown as {auditRedirects(): void}).auditRedirects();
+}
+
+function reportEntries(job: LinkIssues, rawIssues: IssueLike[]): ReportEntryLike[] {
+    return (job as unknown as {
+        getReportEntries(candidateIssues: IssueLike[]): ReportEntryLike[];
+    }).getReportEntries(rawIssues);
+}
+
+function entryWrapperMeta(job: LinkIssues, entry: ReportEntryLike): unknown {
+    return (job as unknown as {
+        getEntryWrapperMeta(candidateEntry: ReportEntryLike): unknown;
+    }).getEntryWrapperMeta(entry);
+}
+
+async function auditExternalLinkWithFallback(job: LinkIssues, getReachable: boolean): Promise<number> {
+    let fallbackGetCalls = 0;
+    const internals = job as unknown as {
+        externalHead(): Promise<never>;
+        getReachableHttpsUpgradeUrl(): Promise<null>;
+        getExternalGetCheckResult(): Promise<{reachable: boolean; botProtectionStatus: null}>;
+        auditExternalLink(externalLink: unknown, config: unknown): Promise<void>;
+    };
+    internals.externalHead = async () => {
+        throw new Error("HEAD transport failure");
+    };
+    internals.getReachableHttpsUpgradeUrl = async () => null;
+    internals.getExternalGetCheckResult = async () => {
+        fallbackGetCalls++;
+        return {reachable: getReachable, botProtectionStatus: null};
+    };
+
+    await internals.auditExternalLink({
+        targetUrl: "https://external.example/resource",
+        sources: new Set([`${baseUrl}/source`]),
+        rawHrefs: new Set(["https://external.example/resource"]),
+        htmlSnippets: new Set(['<a href="https://external.example/resource">Resource</a>']),
+        zones: new Set(["main"])
+    }, {});
+
+    return fallbackGetCalls;
 }
 
 test("query-string canonical variants still audit outgoing links and assets after canonical page was processed", () => {
@@ -337,6 +390,97 @@ test("ignored issue patterns can target only HTTP 429 external link errors", () 
         code: "asset-error",
         statusCode: 429
     }), false);
+});
+
+test("internal HEAD failures remain warnings when fallback GET succeeds", () => {
+    const job = createJob();
+    const targetUrl = `${baseUrl}/head-disabled`;
+
+    job.onHeadersReceived({status: 200} as AxiosResponse, {
+        url: targetUrl,
+        rawUrl: "/head-disabled",
+        referer: `${baseUrl}/source`,
+        statusCode: 200,
+        headRequestFailure: {
+            message: "HEAD request returned HTTP 405.",
+            statusCode: 405
+        }
+    });
+
+    const finding = issues(job).find(issue => issue.code === "internal-head-failed");
+    assert.equal(finding?.severity, "warning");
+    assert.equal(finding?.targetUrl, targetUrl);
+    assert.equal(finding?.headStatusCode, 405);
+    assert.equal(finding?.fallbackGetStatusCode, 200);
+    const html = job.getReportHtml();
+    assert.match(html, /HEAD status: 405/);
+    assert.match(html, /Fallback GET status: 200/);
+});
+
+test("internal HEAD failures remain warnings when fallback GET also fails", () => {
+    const job = createJob();
+    const targetUrl = `${baseUrl}/missing-after-head-failure`;
+
+    job.onHeadersReceived({status: 404} as AxiosResponse, {
+        url: targetUrl,
+        rawUrl: "/missing-after-head-failure",
+        referer: `${baseUrl}/source`,
+        statusCode: 404,
+        headRequestFailure: {
+            message: "HEAD request returned HTTP 405.",
+            statusCode: 405
+        }
+    });
+
+    const targetFindings = issues(job).filter(issue => issue.targetUrl === targetUrl);
+    assert.equal(targetFindings.some(issue => issue.code === "internal-head-failed"), true);
+    assert.equal(targetFindings.some(issue => issue.code === "client-error"), true);
+    assert.equal(
+        targetFindings.find(issue => issue.code === "internal-head-failed")?.fallbackGetStatusCode,
+        404
+    );
+});
+
+test("internal HEAD warning suppression supports URL lists and a sitewide pattern", () => {
+    const ignoredUrl = `${baseUrl}/known-head-exception`;
+    const reportedUrl = `${baseUrl}/unexpected-head-exception`;
+    const failure = {message: "HEAD request returned HTTP 405.", statusCode: 405};
+    const selectivelyIgnoredJob = createJob({
+        headFailureIgnorePatterns: ["/known-head-exception$"]
+    });
+
+    [ignoredUrl, reportedUrl].forEach(url => selectivelyIgnoredJob.onHeadersReceived(
+        {status: 200} as AxiosResponse,
+        {url, rawUrl: new URL(url).pathname, statusCode: 200, headRequestFailure: failure}
+    ));
+    const selectiveFindings = issues(selectivelyIgnoredJob)
+        .filter(issue => issue.code === "internal-head-failed");
+    assert.deepEqual(selectiveFindings.map(issue => issue.targetUrl), [reportedUrl]);
+
+    const sitewideIgnoredJob = createJob({headFailureIgnorePatterns: [".*"]});
+    sitewideIgnoredJob.onHeadersReceived({status: 200} as AxiosResponse, {
+        url: reportedUrl,
+        rawUrl: "/unexpected-head-exception",
+        statusCode: 200,
+        headRequestFailure: failure
+    });
+    assert.equal(issues(sitewideIgnoredJob).some(issue => issue.code === "internal-head-failed"), false);
+});
+
+test("successful fallback GET suppresses a no-response external HEAD warning", async () => {
+    const job = createJob();
+
+    assert.equal(await auditExternalLinkWithFallback(job, true), 1);
+    assert.equal(issues(job).some(issue => issue.code === "external-fetch-failed"), false);
+});
+
+test("external fetch warning remains when HEAD and fallback GET both fail", async () => {
+    const job = createJob();
+
+    assert.equal(await auditExternalLinkWithFallback(job, false), 1);
+    const finding = issues(job).find(issue => issue.code === "external-fetch-failed");
+    assert.equal(finding?.severity, "warning");
+    assert.equal(finding?.targetUrl, "https://external.example/resource");
 });
 
 test("asset URLs are checked for undesirable decoded path characters when asset collection is enabled", () => {
@@ -729,6 +873,124 @@ test("cross-page fragments distinguish a verified missing anchor from an incompl
     assert.ok(issues(job).some(issue => issue.code === "missing-cross-page-fragment"
         && issue.targetUrl === `${targetUrl}#missing`));
     assert.equal(issues(job).some(issue => issue.code === "cross-page-fragment-unverified"), false);
+});
+
+test("cross-page fragment findings keep source attribution scoped to exact anchor markup", () => {
+    const job = createJob();
+    const contactUrl = `${baseUrl}/contact`;
+    const fragmentUrl = `${contactUrl}#form`;
+    const sourceUrls = [
+        `${baseUrl}/`,
+        `${baseUrl}/products`,
+        `${baseUrl}/services`,
+        `${baseUrl}/account`
+    ];
+    const navSnippet = '<a href="/contact#form">Find Your Solution</a>';
+    const sameHrefContentSnippet = '<a href="/contact#form">Talk to an expert</a>';
+    const absoluteContentSnippet = `<a href="${fragmentUrl}">Slide factory expert</a>`;
+
+    sourceUrls.forEach((sourceUrl, index) => {
+        const rawLinks = [pageLink({
+            rawHref: "/contact#form",
+            referer: sourceUrl,
+            htmlSnippet: navSnippet,
+            normalizedUrl: fragmentUrl,
+            zone: "nav"
+        })];
+        if(index === 1) {
+            rawLinks.push(pageLink({
+                rawHref: "/contact#form",
+                referer: sourceUrl,
+                htmlSnippet: sameHrefContentSnippet,
+                normalizedUrl: fragmentUrl,
+                zone: "main"
+            }));
+        }
+        if(index === 2) {
+            rawLinks.push(pageLink({
+                rawHref: fragmentUrl,
+                referer: sourceUrl,
+                htmlSnippet: absoluteContentSnippet,
+                normalizedUrl: fragmentUrl,
+                zone: "main"
+            }));
+        }
+
+        job.onPageReceived(response, makePage({
+            url: sourceUrl,
+            canonicalUrl: sourceUrl,
+            rawLinks
+        }));
+    });
+    job.onPageReceived(response, makePage({
+        url: contactUrl,
+        canonicalUrl: contactUrl,
+        body: '<h1>Contact</h1>'
+    }));
+
+    auditDeferredFragments(job);
+
+    const entries = reportEntries(
+        job,
+        issues(job).filter(issue => issue.code === "missing-cross-page-fragment")
+    );
+    assert.equal(entries.length, 3);
+
+    const navEntry = entries.find(entry => entry.issue.htmlSnippet === navSnippet);
+    const sameHrefContentEntry = entries.find(entry => entry.issue.htmlSnippet === sameHrefContentSnippet);
+    const absoluteContentEntry = entries.find(entry => entry.issue.htmlSnippet === absoluteContentSnippet);
+    assert.equal(navEntry?.count, 4);
+    assert.equal(navEntry?.sourceUrls.size, 4);
+    assert.equal(sameHrefContentEntry?.count, 1);
+    assert.deepEqual(Array.from(sameHrefContentEntry?.sourceUrls ?? []), [sourceUrls[1]]);
+    assert.equal(absoluteContentEntry?.count, 1);
+    assert.deepEqual(Array.from(absoluteContentEntry?.sourceUrls ?? []), [sourceUrls[2]]);
+    assert.notEqual(navEntry, undefined);
+    assert.notEqual(entryWrapperMeta(job, navEntry as ReportEntryLike), null);
+    assert.equal(entryWrapperMeta(job, sameHrefContentEntry as ReportEntryLike), null);
+    assert.equal(entryWrapperMeta(job, absoluteContentEntry as ReportEntryLike), null);
+});
+
+test("same-page fragment findings do not borrow wrapper attribution from ordinary target links", () => {
+    const job = createJob();
+    const contactUrl = `${baseUrl}/contact`;
+    const sourceUrls = [`${baseUrl}/`, `${baseUrl}/products`, contactUrl];
+    const fragmentSnippet = '<a href="/contact#form">Open contact form</a>';
+
+    sourceUrls.forEach(sourceUrl => {
+        const rawLinks = [pageLink({
+            rawHref: "/contact",
+            referer: sourceUrl,
+            htmlSnippet: '<a href="/contact">Contact</a>',
+            normalizedUrl: contactUrl,
+            zone: "nav"
+        })];
+        if(sourceUrl === contactUrl) {
+            rawLinks.push(pageLink({
+                rawHref: "/contact#form",
+                referer: sourceUrl,
+                htmlSnippet: fragmentSnippet,
+                normalizedUrl: `${contactUrl}#form`,
+                zone: "main"
+            }));
+        }
+
+        job.onPageReceived(response, makePage({
+            url: sourceUrl,
+            canonicalUrl: sourceUrl,
+            rawLinks
+        }));
+    });
+
+    const entries = reportEntries(
+        job,
+        issues(job).filter(issue => issue.code === "missing-same-page-fragment")
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].count, 1);
+    assert.deepEqual(Array.from(entries[0].sourceUrls), [contactUrl]);
+    assert.equal(entries[0].issue.htmlSnippet, fragmentSnippet);
+    assert.equal(entryWrapperMeta(job, entries[0]), null);
 });
 
 test("missing canonical and redirect final statuses produce explicit unverified findings", () => {

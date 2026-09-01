@@ -9,6 +9,10 @@
   "requestDelayMs": 0,
   "requestTimeoutMs": 30000,
   "requestTimeoutMaxRetries": 3,
+  "requestHead": {
+    "enabled": true,
+    "failureWarningIgnorePatterns": []
+  },
   "requestTls": {
     "rejectUnauthorized": true
   },

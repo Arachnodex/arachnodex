@@ -20,6 +20,8 @@ type LinkIssue = {
     decodedPath?: string;
     networkErrorCode?: string;
     networkErrorMessage?: string;
+    headStatusCode?: number;
+    fallbackGetStatusCode?: number;
     statusCode?: number;
     finalUrl?: string;
     redirectChain?: string[];
@@ -108,6 +110,7 @@ export default class LinkIssues extends BaseJob {
     baseHostname: string;
     allowedNonCanonicalLinks: string[];
     ignoredIssuePatterns: IgnoredIssuePattern[];
+    internalHeadFailureWarningIgnorePatterns: RegExp[];
     undesirablePathCharacterPattern: RegExp;
     emailReportTriggerLevels: LinkIssueSeverity[] | null;
     includeNotices: boolean;
@@ -181,6 +184,9 @@ export default class LinkIssues extends BaseJob {
     private formatIssue;
     private reportIssueDetails;
     private reportIssueSources;
+    private addHeadRequestDetailLines;
+    private auditInternalHeadFailure;
+    private isInternalHeadFailureWarningIgnored;
     private auditParseWarnings;
     private issueFromParseWarning;
     private auditPageLinks;
@@ -240,6 +246,7 @@ export default class LinkIssues extends BaseJob {
     private auditExternalLink;
     private addExternalBotProtectionNotice;
     private externalGetShowsReachableOrProtected;
+    private getExternalGetCheckResult;
     private externalGetShowsReachable;
     private getExternalFallbackConfig;
     private isTemporaryDnsFailure;

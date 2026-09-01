@@ -424,7 +424,11 @@ export class ReportManager {
         return Object.entries(location)
             .filter(([, value]) => typeof value !== 'undefined')
             .map(([label, value]) => {
-                const stringValue = Array.isArray(value) ? value.join(' => ') : String(value);
+                const stringValue = Array.isArray(value)
+                    ? value.join(' => ')
+                    : typeof value === 'object' && value !== null
+                        ? JSON.stringify(value)
+                        : String(value);
                 return {
                     label,
                     value: stringValue,

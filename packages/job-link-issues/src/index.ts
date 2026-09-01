@@ -43,6 +43,8 @@ type LinkIssue = {
     decodedPath?: string;
     networkErrorCode?: string;
     networkErrorMessage?: string;
+    headStatusCode?: number;
+    fallbackGetStatusCode?: number;
     statusCode?: number;
     finalUrl?: string;
     redirectChain?: string[];
@@ -190,6 +192,11 @@ type ExternalLinkRecord = {
     zones: Set<LinkZone>;
 }
 
+type ExternalGetCheckResult = {
+    reachable: boolean;
+    botProtectionStatus: number|null;
+}
+
 type ReportIssueEntry = {
     issue: LinkIssue;
     key: string;
@@ -236,7 +243,10 @@ const reportByRawHrefCodes = new Set<string>([
     'vbscript-href',
     'non-web-protocol',
     'control-character-href',
-    'target-blank-rel'
+    'target-blank-rel',
+    'missing-same-page-fragment',
+    'missing-cross-page-fragment',
+    'cross-page-fragment-unverified'
 ]);
 const reportByCodeOnlyCodes = new Set<string>([
     'missing-canonical'
@@ -247,8 +257,6 @@ const reportUsingTargetOccurrencesCodes = new Set<string>([
     'client-error',
     'server-error',
     'page-audit-incomplete',
-    'missing-cross-page-fragment',
-    'cross-page-fragment-unverified',
     'canonical-query-variant',
     'non-canonical-internal-link',
     'redirect-loop',
@@ -261,7 +269,7 @@ const linkIssueSeverities: LinkIssueSeverity[] = ['error', 'warning', 'notice'];
 const externalCheckConcurrency = 10;
 const externalCheckTimeoutMs = 5000;
 const externalCheckMaxAttempts = 3;
-const externalCheckUrlTimeoutMs = externalCheckTimeoutMs * externalCheckMaxAttempts;
+const externalCheckUrlTimeoutMs = externalCheckTimeoutMs * (externalCheckMaxAttempts + 1);
 const assetBodyMaxBytes = 1024 * 1024;
 const externalCheckRequestHeaders: Record<string, string> = {
     ...defaultRequestHeaders,
@@ -276,6 +284,7 @@ const reportGroupOrder = [
     'Failed Fetches',
     'Incomplete Page Audits',
     'Unverified Deferred Checks',
+    'Internal HEAD Checks',
     'Redirects',
     'External Links',
     'Asset Links',
@@ -324,6 +333,7 @@ export default class LinkIssues extends BaseJob {
     baseHostname: string;
     allowedNonCanonicalLinks: string[] = [];
     ignoredIssuePatterns: IgnoredIssuePattern[] = [];
+    internalHeadFailureWarningIgnorePatterns: RegExp[] = [];
     undesirablePathCharacterPattern = /[^\w\-/.]/;
     emailReportTriggerLevels: LinkIssueSeverity[]|null = ['error', 'warning', 'notice'];
     includeNotices: boolean;
@@ -346,6 +356,9 @@ export default class LinkIssues extends BaseJob {
             || command.arguments['--include-assets']?.active === true;
         this.promptOutput = command.arguments['-p']?.active === true
             || command.arguments['--prompt']?.active === true;
+        this.internalHeadFailureWarningIgnorePatterns = this.config.getConfigRegExArray(
+            'requestHead.failureWarningIgnorePatterns'
+        );
 
     }
 
@@ -450,6 +463,7 @@ export default class LinkIssues extends BaseJob {
     onHeadersReceived(_response: AxiosResponse|null, _location: Location) {
         // Header events catch status-level problems even when the crawler skips full body
         // downloads for redirects, errors, or non-HTML resources.
+        this.auditInternalHeadFailure(_location);
         const status: number = _location.statusCode ?? (_response?.status ?? 0);
         this.statusByUrl.set(_location.url, {status, location: {..._location}});
 
@@ -633,6 +647,8 @@ export default class LinkIssues extends BaseJob {
             issue.targetUrl ?? '',
             issue.normalizedUrl ?? '',
             issue.rawHref ?? '',
+            issue.headStatusCode ?? '',
+            issue.fallbackGetStatusCode ?? '',
             issue.statusCode ?? '',
             issue.assetKind ?? '',
             issue.sourceLabel ?? ''
@@ -973,6 +989,7 @@ export default class LinkIssues extends BaseJob {
         if(typeof issue.networkErrorMessage === 'string') {
             details.push(`Network error message: ${issue.networkErrorMessage}`);
         }
+        this.addHeadRequestDetailLines(details, issue);
         if(typeof issue.redirectChain !== 'undefined' && issue.redirectChain.length > 1) {
             details.push(`Chain: ${issue.redirectChain.join(' => ')}`);
         }
@@ -1424,10 +1441,17 @@ export default class LinkIssues extends BaseJob {
                 ];
             case 'external-fetch-failed':
                 return [
-                    'These external links did not respond to the crawler HEAD request.',
+                    'These external links did not respond to either the crawler HEAD request or its fallback GET request.',
                     'Verify each target manually; replace dead URLs, remove obsolete links, or keep working URLs that merely block automated checks.',
-                    'To keep verified HEAD-blocking destinations out of future prompts, add an ignoredIssuePatterns entry with codes ["external-fetch-failed"] and a urlPattern matching that destination.',
-                    'Avoid changing working third-party URLs solely because their server rejects HEAD requests.'
+                    'To keep verified crawler-blocking destinations out of future prompts, add an ignoredIssuePatterns entry with codes ["external-fetch-failed"] and a urlPattern matching that destination.',
+                    'Avoid changing working third-party URLs solely because their server rejects automated requests.'
+                ];
+            case 'internal-head-failed':
+                return [
+                    'The internal URL did not return a successful HEAD response, so the crawler used GET to determine its final availability.',
+                    'Investigate unexpected HEAD behavior when the site is intended to support HEAD requests.',
+                    'For known exceptions, add a matching regular expression to requestHead.failureWarningIgnorePatterns in the core config.',
+                    'If the site intentionally does not support HEAD anywhere, set requestHead.enabled to false.'
                 ];
             case 'asset-redirect':
                 return [
@@ -1760,6 +1784,7 @@ export default class LinkIssues extends BaseJob {
         if(typeof issue.networkErrorMessage === 'string') {
             details.push(`Network error message: ${issue.networkErrorMessage}`);
         }
+        this.addHeadRequestDetailLines(details, issue);
         if(typeof issue.redirectChain !== 'undefined' && issue.redirectChain.length > 1) {
             details.push(`Chain: ${issue.redirectChain.join(' => ')}`);
         }
@@ -2101,6 +2126,9 @@ export default class LinkIssues extends BaseJob {
         if(typeof issue.networkErrorMessage === 'string') {
             this.reportLine(`Network error message: ${issue.networkErrorMessage}`, theme, 4);
         }
+        const headDetails: string[] = [];
+        this.addHeadRequestDetailLines(headDetails, issue);
+        headDetails.forEach(detail => this.reportLine(detail, theme, 4));
         if(typeof issue.redirectChain !== 'undefined' && issue.redirectChain.length > 1) {
             this.reportLine(`Chain: ${issue.redirectChain.join(' => ')}`, theme, 4);
         }
@@ -2117,6 +2145,45 @@ export default class LinkIssues extends BaseJob {
         this.reportLine(`Found on ${sources.length} ${pageLabel} (${entry.count} ${occurrenceLabel}):`, theme, 4);
         sources.forEach(source => {
             this.reportLine(source, theme, 5);
+        });
+    }
+
+    private addHeadRequestDetailLines(details: string[], issue: LinkIssue): void {
+        if(typeof issue.headStatusCode === 'number') {
+            details.push(`HEAD status: ${issue.headStatusCode}`);
+        }
+        if(typeof issue.fallbackGetStatusCode === 'number') {
+            const status = issue.fallbackGetStatusCode === 0 ? 'no response' : String(issue.fallbackGetStatusCode);
+            details.push(`Fallback GET status: ${status}`);
+        }
+    }
+
+    private auditInternalHeadFailure(location: Location): void {
+        const failure = location.headRequestFailure;
+        if(typeof failure === 'undefined' || this.isInternalHeadFailureWarningIgnored(location.url)) {
+            return;
+        }
+
+        this.addIssue({
+            severity: 'warning',
+            group: 'Internal HEAD Checks',
+            code: 'internal-head-failed',
+            message: 'Internal HEAD request failed; the fallback GET result determined final link availability.',
+            targetUrl: location.url,
+            sourceUrl: location.referer,
+            htmlSnippet: location.htmlSnippet,
+            networkErrorCode: failure.errorCode,
+            networkErrorMessage: failure.message,
+            headStatusCode: failure.statusCode,
+            fallbackGetStatusCode: location.statusCode ?? 0,
+            zone: 'unknown'
+        });
+    }
+
+    private isInternalHeadFailureWarningIgnored(url: string): boolean {
+        return this.internalHeadFailureWarningIgnorePatterns.some(pattern => {
+            pattern.lastIndex = 0;
+            return pattern.test(url);
         });
     }
 
@@ -3606,15 +3673,15 @@ export default class LinkIssues extends BaseJob {
                 return;
             }
 
-            const protectedStatus = await this.getExternalOrHttpsUpgradeBotProtectionStatus(
+            const fallbackResult = await this.getExternalGetCheckResult(
                 externalLink.targetUrl,
                 this.getExternalFallbackConfig(config)
             );
-            if(protectedStatus !== null) {
-                this.addExternalBotProtectionNotice(externalLink, protectedStatus);
+            if(fallbackResult.botProtectionStatus !== null) {
+                this.addExternalBotProtectionNotice(externalLink, fallbackResult.botProtectionStatus);
                 return;
             }
-            if(this.runtime.aborted) {
+            if(this.runtime.aborted || fallbackResult.reachable) {
                 return;
             }
 
@@ -3622,7 +3689,7 @@ export default class LinkIssues extends BaseJob {
                 severity: 'warning',
                 group: 'External Links',
                 code: 'external-fetch-failed',
-                message: 'External link did not respond to a HEAD request.',
+                message: 'External link did not respond to HEAD or fallback GET requests.',
                 targetUrl: externalLink.targetUrl,
                 sourceUrl,
                 rawHref,
@@ -3654,26 +3721,40 @@ export default class LinkIssues extends BaseJob {
     }
 
     private async externalGetShowsReachableOrProtected(url: string, config: AxiosRequestConfig): Promise<boolean> {
+        return (await this.getExternalGetCheckResult(url, config)).reachable;
+    }
+
+    private async getExternalGetCheckResult(
+        url: string,
+        config: AxiosRequestConfig
+    ): Promise<ExternalGetCheckResult> {
         if(this.runtime.aborted) {
-            return false;
+            return {reachable: false, botProtectionStatus: null};
         }
 
         try {
             const response = await this.externalGet(url, config, false);
-            return response.status >= 200 && response.status < 300
+            const botProtection = this.isBotProtectionResponse(response);
+            return {
+                reachable: response.status >= 200 && response.status < 300
                 || response.status >= 300 && response.status < 400
-                || this.isBotProtectionResponse(response);
+                || botProtection,
+                botProtectionStatus: botProtection ? response.status : null
+            };
         } catch (e) {
             if(this.runtime.aborted || this.isAbortError(e)) {
-                return false;
+                return {reachable: false, botProtectionStatus: null};
             }
 
-            return axios.isAxiosError(e)
-                && typeof e.response !== 'undefined'
-                && (
-                    this.isBotProtectionResponse(e.response)
-                    || e.response.status >= 200 && e.response.status < 400
-                );
+            if(!axios.isAxiosError(e) || typeof e.response === 'undefined') {
+                return {reachable: false, botProtectionStatus: null};
+            }
+
+            const botProtection = this.isBotProtectionResponse(e.response);
+            return {
+                reachable: botProtection || e.response.status >= 200 && e.response.status < 400,
+                botProtectionStatus: botProtection ? e.response.status : null
+            };
         }
     }
 
@@ -3766,26 +3847,7 @@ export default class LinkIssues extends BaseJob {
     }
 
     private async getExternalBotProtectionStatus(url: string, config: AxiosRequestConfig): Promise<number|null> {
-        if(this.runtime.aborted) {
-            return null;
-        }
-
-        try {
-            const response = await this.externalGet(url, config, false);
-            return this.isBotProtectionResponse(response) ? response.status : null;
-        } catch (e) {
-            if(this.runtime.aborted || this.isAbortError(e)) {
-                return null;
-            }
-
-            if(axios.isAxiosError(e)
-                && typeof e.response !== 'undefined'
-                && this.isBotProtectionResponse(e.response)) {
-                return e.response.status;
-            }
-
-            return null;
-        }
+        return (await this.getExternalGetCheckResult(url, config)).botProtectionStatus;
     }
 
     private async getExternalOrHttpsUpgradeBotProtectionStatus(url: string, config: AxiosRequestConfig): Promise<number|null> {

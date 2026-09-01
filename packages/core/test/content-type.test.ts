@@ -21,7 +21,7 @@ function response<T>(status: number, contentType: string|undefined, data: T): Ax
     } as unknown as AxiosResponse<T>;
 }
 
-function createThread(maxRetries = 0) {
+function createThread(maxRetries = 0, requestHeadEnabled = true) {
     const events = new EventEmitter();
     const abortController = new AbortController();
     const runtime = {
@@ -31,7 +31,9 @@ function createThread(maxRetries = 0) {
         throttledRequestCount: 0,
         events,
         config: {
-            getConfigBoolean: (_key: string, _scope?: unknown, fallback = false) => fallback,
+            getConfigBoolean: (key: string, _scope?: unknown, fallback = false) => key === "requestHead.enabled"
+                ? requestHeadEnabled
+                : fallback,
             getConfigNumber: (key: string) => {
                 if(key === 'requestTimeoutMs') {
                     return 1000;
@@ -266,6 +268,71 @@ test("GET replaces HEAD when the server rejects HEAD", async t => {
 
     assert.deepEqual(statuses, [200]);
     assert.equal(pageResponse?.data, "<html></html>");
+    assert.equal(location.headRequestFailure?.statusCode, 405);
+});
+
+test("GET rescues any internal HEAD error status and preserves the HEAD failure", async t => {
+    const {events, location, thread, visited} = createThread();
+    const statuses: number[] = [];
+    events.on('headers-received', (received: AxiosResponse) => statuses.push(received.status));
+
+    t.mock.method(axios, 'head', async () => response(503, "text/plain", undefined));
+    t.mock.method(axios, 'get', async () => response(
+        200,
+        "text/html",
+        Readable.from(["<html></html>"])
+    ));
+
+    await thread.fetch(location, visited);
+
+    assert.deepEqual(statuses, [200]);
+    assert.equal(location.statusCode, 200);
+    assert.equal(location.headRequestFailure?.statusCode, 503);
+    assert.equal(visited[testUrl].headRequestFailure?.statusCode, 503);
+});
+
+test("GET rescues an internal HEAD transport failure and preserves its error code", async t => {
+    const {events, location, thread, visited} = createThread();
+    const statuses: number[] = [];
+    events.on('headers-received', (received: AxiosResponse) => statuses.push(received.status));
+
+    t.mock.method(axios, 'head', async () => {
+        throw new axios.AxiosError("socket closed", "ECONNRESET", undefined, {});
+    });
+    t.mock.method(axios, 'get', async () => response(
+        200,
+        "text/html",
+        Readable.from(["<html></html>"])
+    ));
+
+    await thread.fetch(location, visited);
+
+    assert.deepEqual(statuses, [200]);
+    assert.equal(location.headRequestFailure?.errorCode, "ECONNRESET");
+    assert.equal(visited[testUrl].headRequestFailure?.errorCode, "ECONNRESET");
+});
+
+test("disabled internal HEAD requests crawl directly with GET", async t => {
+    const {events, location, thread, visited} = createThread(0, false);
+    const statuses: number[] = [];
+    let headCount = 0;
+    events.on('headers-received', (received: AxiosResponse) => statuses.push(received.status));
+
+    t.mock.method(axios, 'head', async () => {
+        headCount++;
+        return response(200, "text/html", undefined);
+    });
+    t.mock.method(axios, 'get', async () => response(
+        200,
+        "text/html",
+        Readable.from(["<html></html>"])
+    ));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(headCount, 0);
+    assert.deepEqual(statuses, [200]);
+    assert.equal(location.headRequestFailure, undefined);
 });
 
 test("body failures retry independently and emit an incomplete audit outcome", async t => {

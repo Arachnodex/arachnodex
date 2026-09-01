@@ -7,10 +7,14 @@ export declare class ArachnodexThread {
     requestDelay: number;
     requestTimeout: number;
     requestTimeoutMaxRetries: number;
+    requestHeadEnabled: boolean;
     console: OutputHelper;
     constructor(index: number, runtime?: ArachnodexRuntime);
     waitTurn(): Promise<void>;
     fetch(location: Location, visited: Record<string, Location>): Promise<void>;
+    private getRequestConfig;
+    private publishStandaloneGetResult;
+    private publishNoResponse;
     private publishHeaders;
     private publishPageDataResult;
     private publishPageAuditFailure;

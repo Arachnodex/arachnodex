@@ -163,6 +163,7 @@ want the ignore to apply only to specific finding types.
 | Crawl status | `fetch-failed`, `client-error`, `server-error` |
 | Incomplete page audits | `page-audit-incomplete` |
 | Unverified deferred checks | `cross-page-fragment-unverified`, `canonical-target-unverified`, `redirect-final-target-unverified` |
+| Internal HEAD checks | `internal-head-failed` |
 | Internal redirects | `redirect-response`, `redirect-loop`, `redirect-final-target-failed`, `redirect-final-target-unverified`, `redirect-chain`, `redirect-final-target-non-canonical` |
 | External links | `external-redirect`, `external-http-upgrade-available`, `external-error`, `external-bot-protection`, `external-dns-temporary-failure`, `external-fetch-failed` |
 | Asset links | `asset-redirect`, `asset-http-upgrade-available`, `asset-error`, `asset-bot-protection`, `asset-dns-temporary-failure`, `asset-fetch-failed` |
@@ -183,6 +184,37 @@ The job uses three severity levels:
 | `error` | Broken or unsafe behavior that usually needs correction. |
 | `warning` | Risky, unexpected, or SEO-relevant behavior that may be intentional but should be reviewed. |
 | `notice` | Lower-priority cleanup and quality findings. Notice output is hidden unless `-n` is used. |
+
+## Internal HEAD Checks
+
+The core crawler normally probes each internal URL with HEAD and then uses GET
+to determine its content. If HEAD returns an error status or fails without a
+response, GET is used as the fallback and its result remains authoritative for
+the link's availability. The failed HEAD is also reported separately as a
+warning with issue code `internal-head-failed`, even when fallback GET succeeds.
+If GET also fails, both the HEAD warning and the applicable link failure are
+reported.
+
+Known exceptions can be omitted from this warning with core config patterns.
+Patterns are regular-expression strings matched against the full normalized
+internal URL:
+
+```json
+{
+  "requestHead": {
+    "enabled": true,
+    "failureWarningIgnorePatterns": [
+      "^https://www\\.example\\.com/legacy/",
+      "^https://www\\.example\\.com/api/status$"
+    ]
+  }
+}
+```
+
+Use `".*"` to suppress the warning for the entire site while retaining HEAD
+requests and GET fallback. Set `requestHead.enabled` to `false` instead when the
+site should receive GET requests immediately and no internal HEAD requests at
+all. Disabling HEAD also means there are no HEAD-failure warnings to report.
 
 ## External Links And Bot Protection
 

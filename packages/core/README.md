@@ -212,6 +212,10 @@ Full example:
   "requestDelayMs": 0,
   "requestTimeoutMs": 30000,
   "requestTimeoutMaxRetries": 3,
+  "requestHead": {
+    "enabled": true,
+    "failureWarningIgnorePatterns": []
+  },
   "requestTls": {
     "rejectUnauthorized": true
   },
@@ -259,8 +263,46 @@ Full example:
 | `requestDelayMs` | number | `0` | Delay in milliseconds before crawler requests. |
 | `requestTimeoutMs` | number | `30000` | Per-request timeout in milliseconds. |
 | `requestTimeoutMaxRetries` | number | `3` | Maximum retry attempts for timeout failures. |
+| `requestHead.enabled` | boolean | `true` | Probe internal URLs with HEAD before GET. Set to `false` to skip HEAD and request every internal URL with GET immediately. |
+| `requestHead.failureWarningIgnorePatterns` | string[] | `[]` | Regular expressions matched against the full normalized internal URL. Matching URLs still use fallback GET after a failed HEAD, but the Link Issues job omits the `internal-head-failed` warning. |
 | `requestTls.rejectUnauthorized` | boolean | `true` | Verify HTTPS certificates for crawler requests and job requests that use the core request TLS setting. Set to `false` only when intentionally crawling a site with an invalid certificate. |
 | `treatHashAsUniquePage` | boolean | `false` | Keep URL fragments as part of the crawled URL identity. By default, fragments are stripped so `/page#one` and `/page#two` are treated as the same page. |
+
+Internal HEAD responses below 200 or at least 400, plus transport failures that
+do not return a response, fall back to GET. The GET result determines whether
+the URL is available, while the Link Issues job separately reports the failed
+HEAD as an `internal-head-failed` warning. Redirect responses remain normal
+redirect findings rather than HEAD failures.
+
+Suppress the HEAD warning for known URL exceptions with regular expressions:
+
+```json
+{
+  "requestHead": {
+    "enabled": true,
+    "failureWarningIgnorePatterns": [
+      "^https://www\\.example\\.com/legacy/",
+      "^https://www\\.example\\.com/api/status$"
+    ]
+  }
+}
+```
+
+Use `".*"` as the only pattern to suppress these warnings site-wide while
+retaining HEAD probes and GET fallback behavior. To avoid sending internal HEAD
+requests entirely, configure:
+
+```json
+{
+  "requestHead": {
+    "enabled": false,
+    "failureWarningIgnorePatterns": []
+  }
+}
+```
+
+With HEAD disabled, the crawler goes directly to GET and no HEAD-failure
+warnings are generated.
 
 ### Filtering Settings
 

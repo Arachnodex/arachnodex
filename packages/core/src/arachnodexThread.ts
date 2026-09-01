@@ -12,7 +12,6 @@ import {defaultRequestHeaders} from "./services/requestHeaders.js";
 import {ArachnodexRuntime} from "./runtime.js";
 
 const pollMs = 150;
-const headGetFallbackStatuses = new Set<number>([403, 405, 501]);
 const htmlSniffByteLimit = 8192;
 const htmlDocumentPrefixPattern = /^(?:\uFEFF|\s)*(?:(?:<!--[\s\S]*?-->|<\?xml[\s\S]*?\?>)\s*)*(?:<!doctype\s+html(?:\s|>)|<html(?:\s|>))/i;
 
@@ -88,6 +87,7 @@ export class ArachnodexThread {
     requestDelay: number = 0;
     requestTimeout: number = 30000;
     requestTimeoutMaxRetries: number = 3;
+    requestHeadEnabled: boolean = true;
     console: OutputHelper;
 
     constructor(index: number, private readonly runtime = new ArachnodexRuntime()) {
@@ -105,6 +105,7 @@ export class ArachnodexThread {
         if(!Number.isInteger(this.requestTimeoutMaxRetries) || this.requestTimeoutMaxRetries < 0) {
             this.requestTimeoutMaxRetries = 3;
         }
+        this.requestHeadEnabled = this.runtime.config.getConfigBoolean('requestHead.enabled', null, true);
     }
 
     async waitTurn(): Promise<void> {
@@ -243,6 +244,7 @@ export class ArachnodexThread {
                 redirectedTo: visited[location.url].redirectedTo,
                 redirectedFrom: visited[location.url].redirectedFrom,
                 canonicalUrl: visited[location.url].canonicalUrl,
+                headRequestFailure: visited[location.url].headRequestFailure,
                 redirectRoot: visited[location.url].redirectRoot,
                 redirectChain: visited[location.url].redirectChain,
                 redirectCode: visited[location.url].redirectCode,
@@ -301,29 +303,16 @@ export class ArachnodexThread {
         this.runtime.events.emit('before-request', location);
 
         let locationFinal: Location | undefined;
+        const config = this.getRequestConfig(location);
 
         // HEAD remains the inexpensive status/redirect probe. Successful URLs then use a
         // streaming GET: HTML is buffered for jobs, while non-HTML streams are aborted as
         // soon as their response headers arrive.
         try {
-            const config: AxiosRequestConfig = {
-                maxRedirects: 0,
-                timeout: this.requestTimeout,
-                signal: this.runtime.abortSignal,
-                validateStatus: () => true,
-                headers: {
-                    ...defaultRequestHeaders
-                }
-            }
-            config.httpsAgent = new https.Agent({
-                requestCert: false,
-                rejectUnauthorized: this.runtime.config.getConfigBoolean('requestTls.rejectUnauthorized', null, true)
-            });
-            if(typeof location.referer !== 'undefined' && location.referer !== null) {
-                config.headers = {
-                    ...(config.headers ?? {}),
-                    referer: location.referer
-                }
+            if(!this.requestHeadEnabled) {
+                const directGetResult = await this.fetchPageData(location, config);
+                await this.publishStandaloneGetResult(directGetResult, location, visited);
+                return;
             }
 
             const headResponse = await axios.head<void>(location.url, config);
@@ -331,32 +320,19 @@ export class ArachnodexThread {
                 return;
             }
 
-            if(headGetFallbackStatuses.has(headResponse.status)) {
+            if(headResponse.status < 200 || headResponse.status >= 400) {
+                location.headRequestFailure = {
+                    message: `HEAD request returned HTTP ${headResponse.status}.`,
+                    statusCode: headResponse.status
+                };
                 const fallbackResult = await this.fetchPageData(location, config, headResponse);
-                if(fallbackResult.kind === 'aborted') {
-                    return;
-                }
-                if(fallbackResult.kind === 'failed') {
-                    if(typeof fallbackResult.response !== 'undefined') {
-                        await this.publishHeaders(fallbackResult.response, location, visited);
-                    } else {
-                        await this.publishHeaders(headResponse, location, visited);
-                    }
-                    if(typeof fallbackResult.response === 'undefined'
-                        || (fallbackResult.response.status >= 200 && fallbackResult.response.status < 300)) {
-                        this.publishPageAuditFailure(fallbackResult, location);
-                    }
-                    return;
-                }
-
-                await this.publishHeaders(fallbackResult.response, location, visited);
-                await this.publishPageDataResult(fallbackResult, location, visited);
+                await this.publishStandaloneGetResult(fallbackResult, location, visited);
                 return;
             }
 
             await this.publishHeaders(headResponse, location, visited);
             locationFinal = {...location};
-            if(headResponse.status < 200 || headResponse.status >= 300) {
+            if(headResponse.status >= 300) {
                 return;
             }
 
@@ -405,17 +381,14 @@ export class ArachnodexThread {
                     });
                     return;
                 }
-
-                this.runtime.events.emit('location-visited', location.url, 0);
-
-                this.runtime.events.emit(
-                    'error',
-                    nonSuccessResponseError,
-                    noResponseMessage,
-                    locationFinal ?? location,
-                    false,
-                    false
-                );
+                location.headRequestFailure = {
+                    message: noResponseMessage,
+                    errorCode: typeof nonSuccessResponseError.code === 'string'
+                        ? nonSuccessResponseError.code
+                        : undefined
+                };
+                const fallbackResult = await this.fetchPageData(location, config);
+                await this.publishStandaloneGetResult(fallbackResult, location, visited);
             } else {
                 // Program error
                 this.runtime.events.emit(
@@ -436,6 +409,73 @@ export class ArachnodexThread {
         }
     }
 
+    private getRequestConfig(location: Location): AxiosRequestConfig {
+        return {
+            maxRedirects: 0,
+            timeout: this.requestTimeout,
+            signal: this.runtime.abortSignal,
+            validateStatus: () => true,
+            headers: {
+                ...defaultRequestHeaders,
+                ...(typeof location.referer === 'string' ? {referer: location.referer} : {})
+            },
+            httpsAgent: new https.Agent({
+                requestCert: false,
+                rejectUnauthorized: this.runtime.config.getConfigBoolean(
+                    'requestTls.rejectUnauthorized',
+                    null,
+                    true
+                )
+            })
+        };
+    }
+
+    private async publishStandaloneGetResult(
+        result: PageDataFetchResult,
+        location: Location,
+        visited: Record<string, Location>
+    ): Promise<void> {
+        if(result.kind === 'aborted') {
+            return;
+        }
+        if(result.kind === 'failed') {
+            if(typeof result.response !== 'undefined') {
+                await this.publishHeaders(result.response, location, visited);
+            } else {
+                await this.publishNoResponse(location, visited);
+            }
+            if(typeof result.response === 'undefined'
+                || (result.response.status >= 200 && result.response.status < 300)) {
+                this.publishPageAuditFailure(result, location);
+            }
+            return;
+        }
+
+        await this.publishHeaders(result.response, location, visited);
+        await this.publishPageDataResult(result, location, visited);
+    }
+
+    private async publishNoResponse(location: Location, visited: Record<string, Location>): Promise<void> {
+        await this.runtime.lock.forUnlock();
+        if(this.runtime.aborted) {
+            return;
+        }
+
+        this.runtime.lock.lock();
+        try {
+            location.statusCode = 0;
+            if(typeof visited[location.url] !== 'undefined') {
+                visited[location.url].statusCode = 0;
+                visited[location.url].headRequestFailure = location.headRequestFailure;
+            }
+            this.runtime.events.emit('location-visited', location.url, 0);
+        } finally {
+            this.runtime.lock.unlock();
+        }
+
+        this.runtime.events.emit('headers-received', null, location);
+    }
+
     private async publishHeaders(
         response: AxiosResponse,
         location: Location,
@@ -451,6 +491,7 @@ export class ArachnodexThread {
             location.statusCode = response.status;
             if(typeof visited[location.url] !== 'undefined') {
                 visited[location.url].statusCode = response.status;
+                visited[location.url].headRequestFailure = location.headRequestFailure;
             }
             this.runtime.events.emit('location-visited', location.url, response.status);
         } finally {
@@ -504,9 +545,10 @@ export class ArachnodexThread {
     private async fetchPageData(
         location: Location,
         config: AxiosRequestConfig,
-        headerResponse: AxiosResponse
+        headerResponse?: AxiosResponse
     ): Promise<PageDataFetchResult> {
-        const fallbackContentType = headerResponse.status >= 200 && headerResponse.status < 300
+        const fallbackContentType = typeof headerResponse !== 'undefined'
+            && headerResponse.status >= 200 && headerResponse.status < 300
             ? normalizeContentTypeHeader(headerResponse.headers['content-type'])
             : '';
         let lastError: unknown = new Error('GET request did not complete.');
