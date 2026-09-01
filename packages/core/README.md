@@ -365,6 +365,28 @@ This job is in beta and has not been fully tested. Review all generated directiv
 
 Read the [CSP Report job README](packages/job-csp-report/README.md) for install notes, switches, output formats, inline handling, nested scanning behavior, and full job config settings.
 
+## Updating a Created Project
+
+Update an existing project from inside its directory:
+
+```sh
+npm create @arachnodex@latest -- --update
+```
+
+Update a project at another path by passing the directory explicitly:
+
+```sh
+npm create @arachnodex@latest -- --update ../my-crawl-project
+```
+
+Update mode installs the current official Arachnodex packages, refreshes the generated `README.md` and `config/*.example.json` reference files, and preserves the existing project name, version, scripts, custom dependencies, and runtime `config/*.json` files. Commit or back up the project first if its generated README or example files contain local edits.
+
+To refresh the generated files and dependency ranges without installing packages, add `--no-install` and run the printed install command later:
+
+```sh
+npm create @arachnodex@latest -- --update --no-install
+```
+
 ## Updating Individual Packages
 
 Arachnodex is designed as a set of independently published npm packages. You can update the core, jobs, or shared heuristic data separately when new versions are available.

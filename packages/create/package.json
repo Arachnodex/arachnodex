@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/create",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Create an Arachnodex crawler project.",
   "type": "module",
   "main": "bin/index.js",
@@ -34,17 +34,18 @@
     "types"
   ],
   "scripts": {
+    "test": "node --test --conditions=development --import tsx test/*.test.ts",
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
     "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
     "build:types": "tsc -p tsconfig.types.json",
     "build": "npm run clean:bin && npm run clean:types && esbuild src/index.ts --bundle --platform=node --format=esm --target=node22 --minify --packages=external --banner:js='#!/usr/bin/env node' --outfile=bin/index.js && node -e \"require('node:fs').chmodSync('bin/index.js', 0o755)\" && npm run build:types"
   },
   "dependencies": {
-    "@arachnodex/core": "^1.0.8",
-    "@arachnodex/job-csp-report": "^1.0.0",
-    "@arachnodex/job-link-issues": "^1.0.7",
-    "@arachnodex/job-nfa-report": "^1.0.0",
-    "@arachnodex/job-sitemap": "^1.0.1"
+    "@arachnodex/core": "^1.0.11",
+    "@arachnodex/job-csp-report": "^1.0.1",
+    "@arachnodex/job-link-issues": "^1.0.10",
+    "@arachnodex/job-nfa-report": "^1.0.5",
+    "@arachnodex/job-sitemap": "^1.0.3"
   },
   "devDependencies": {
     "@types/node": "^22",
