@@ -1,6 +1,6 @@
 {
   "name": "@arachnodex/core",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Arachnodex core crawler runtime, shared APIs, and CLI.",
   "main": "bin/index.js",
   "types": "types/index.d.ts",
@@ -29,7 +29,7 @@
     "types"
   ],
   "scripts": {
-    "test": "node --conditions=development --import tsx test/*.test.ts",
+    "test": "node --test --conditions=development --import tsx test/*.test.ts",
     "clean:bin": "node -e \"const fs=require('node:fs'); fs.rmSync('bin',{recursive:true,force:true}); fs.mkdirSync('bin',{recursive:true});\"",
     "clean:types": "node -e \"const fs=require('node:fs'); fs.rmSync('types',{recursive:true,force:true});\"",
     "build:types": "tsc -p tsconfig.types.json",
@@ -66,20 +66,19 @@
   "homepage": "https://github.com/Arachnodex/arachnodex#readme",
   "dependencies": {
     "@arachnodex/bot-protection-heuristics": "^1.0.2",
-    "axios": "^1.12.2",
+    "axios": "^1.20.0",
     "chalk": "^5.6.2",
-    "deepmerge-ts": "^1.1.5",
     "eventemitter3": "^4.0.7",
     "fs-extra": "^11.3.2",
     "handlebars": "^4.7.8",
     "jsdom": "^22.1.0",
-    "nodemailer": "^6.10.1"
+    "nodemailer": "^9.0.6"
   },
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/jsdom": "^27.0.0",
     "@types/node": "^22",
-    "@types/nodemailer": "^6.4.21",
+    "@types/nodemailer": "^8.0.1",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "chokidar": "^4.0.3",

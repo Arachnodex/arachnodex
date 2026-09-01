@@ -13,6 +13,54 @@ import {ArachnodexRuntime} from "./runtime.js";
 
 const pollMs = 150;
 const headGetFallbackStatuses = new Set<number>([403, 405, 501]);
+const htmlSniffByteLimit = 8192;
+const htmlDocumentPrefixPattern = /^(?:\uFEFF|\s)*(?:(?:<!--[\s\S]*?-->|<\?xml[\s\S]*?\?>)\s*)*(?:<!doctype\s+html(?:\s|>)|<html(?:\s|>))/i;
+
+function responseChunkToBuffer(chunk: unknown): Buffer {
+    if(Buffer.isBuffer(chunk)) {
+        return chunk;
+    }
+    if(chunk instanceof Uint8Array || typeof chunk === 'string') {
+        return Buffer.from(chunk);
+    }
+    throw new TypeError('Response stream returned an unsupported chunk type.');
+}
+
+function looksLikeHtmlDocument(buffer: Buffer): boolean {
+    return buffer.indexOf(0) === -1
+        && htmlDocumentPrefixPattern.test(buffer.toString('utf8'));
+}
+
+async function inspectUnlabeledResponseStream(stream: Readable): Promise<Buffer|null> {
+    const bodyChunks: Buffer[] = [];
+    const prefixChunks: Buffer[] = [];
+    let prefixLength = 0;
+    let htmlDetected = false;
+
+    for await (const chunk of stream) {
+        const buffer = responseChunkToBuffer(chunk);
+        bodyChunks.push(buffer);
+
+        if(htmlDetected) {
+            continue;
+        }
+
+        const remainingPrefixBytes = htmlSniffByteLimit - prefixLength;
+        if(remainingPrefixBytes > 0) {
+            const prefixChunk = buffer.subarray(0, remainingPrefixBytes);
+            prefixChunks.push(prefixChunk);
+            prefixLength += prefixChunk.length;
+        }
+
+        htmlDetected = looksLikeHtmlDocument(Buffer.concat(prefixChunks, prefixLength));
+        if(!htmlDetected && prefixLength >= htmlSniffByteLimit) {
+            stream.destroy();
+            return null;
+        }
+    }
+
+    return htmlDetected ? Buffer.concat(bodyChunks) : null;
+}
 
 type PageDataFetchResult =
     | {
@@ -317,6 +365,12 @@ export class ArachnodexThread {
                 return;
             }
             if(dataResult.kind === 'failed') {
+                if(typeof dataResult.response !== 'undefined'
+                    && dataResult.response.status !== headResponse.status) {
+                    // A completed GET response is more authoritative than the earlier HEAD.
+                    // Publish its failure status so caches and jobs do not retain a false 2xx.
+                    await this.publishHeaders(dataResult.response, location, visited);
+                }
                 this.publishPageAuditFailure(dataResult, location);
                 return;
             }
@@ -452,7 +506,9 @@ export class ArachnodexThread {
         config: AxiosRequestConfig,
         headerResponse: AxiosResponse
     ): Promise<PageDataFetchResult> {
-        const fallbackContentType = normalizeContentTypeHeader(headerResponse.headers['content-type']);
+        const fallbackContentType = headerResponse.status >= 200 && headerResponse.status < 300
+            ? normalizeContentTypeHeader(headerResponse.headers['content-type'])
+            : '';
         let lastError: unknown = new Error('GET request did not complete.');
         let lastResponse: AxiosResponse<Readable>|undefined;
 
@@ -469,12 +525,15 @@ export class ArachnodexThread {
                     validateStatus: () => true
                 });
                 lastResponse = response;
-                const contentType = normalizeContentTypeHeader(response.headers['content-type']);
+                const responseContentType = normalizeContentTypeHeader(response.headers['content-type']);
+                const contentType = responseContentType !== ''
+                    ? responseContentType
+                    : fallbackContentType;
 
                 if(response.status < 200 || response.status >= 300) {
                     response.data.destroy();
                     lastError = new Error(`GET request returned HTTP ${response.status}.`);
-                } else if(!isHtmlContentType(contentType)) {
+                } else if(contentType !== '' && !isHtmlContentType(contentType)) {
                     // The request reached response headers, but confirmed non-HTML bodies are
                     // never buffered. Destroying the stream keeps document checks inexpensive.
                     response.data.destroy();
@@ -488,12 +547,31 @@ export class ArachnodexThread {
                         }
                     };
                 } else {
-                    const body = await this.readResponseStream(response.data);
+                    const body = contentType !== ''
+                        ? await this.readResponseStream(response.data)
+                        : await inspectUnlabeledResponseStream(response.data);
+                    if(body === null) {
+                        return {
+                            kind: 'non-html',
+                            response,
+                            auditOutcome: {
+                                status: 'non-html',
+                                contentType: '',
+                                lastModified: this.getHeaderString(response.headers['last-modified'])
+                            }
+                        };
+                    }
+
+                    const effectiveContentType = contentType !== '' ? contentType : 'text/html';
                     return {
                         kind: 'html',
                         response: {
                             ...response,
-                            data: body.toString('utf8')
+                            data: body.toString('utf8'),
+                            headers: {
+                                ...response.headers,
+                                'content-type': effectiveContentType
+                            }
                         }
                     };
                 }
@@ -558,14 +636,7 @@ export class ArachnodexThread {
     private async readResponseStream(stream: Readable): Promise<Buffer> {
         const chunks: Buffer[] = [];
         for await (const chunk of stream) {
-            const value: unknown = chunk;
-            if(Buffer.isBuffer(value)) {
-                chunks.push(Buffer.from(value));
-            } else if(value instanceof Uint8Array || typeof value === 'string') {
-                chunks.push(Buffer.from(value));
-            } else {
-                throw new TypeError('Response stream returned an unsupported chunk type.');
-            }
+            chunks.push(responseChunkToBuffer(chunk));
         }
         return Buffer.concat(chunks);
     }

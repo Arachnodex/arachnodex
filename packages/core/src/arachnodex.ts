@@ -32,6 +32,21 @@ const pollMs = 25;
 const pollMsExt = 150;
 const hostnameWwwPattern = /^www\./i;
 
+function getObservedLinkUrl(preparedUrl: string, observedUrl?: string): string {
+    // The crawl identity normally excludes fragments so each document is fetched once,
+    // but jobs still need the observed fragment to audit same- and cross-page anchors.
+    if(typeof observedUrl === 'undefined') {
+        return preparedUrl;
+    }
+
+    const fragmentIndex = observedUrl.indexOf('#');
+    if(fragmentIndex === -1 || preparedUrl.indexOf('#') !== -1) {
+        return preparedUrl;
+    }
+
+    return `${preparedUrl}${observedUrl.substring(fragmentIndex)}`;
+}
+
 export class Arachnodex {
 
     // Core collaborators are created once and shared through the crawl lifecycle.
@@ -738,7 +753,11 @@ export class Arachnodex {
                         this.visited[location.url].redirectRoot = redirectRoot;
                         this.visited[location.url].redirectChain = redirectChain;
                     }
-                    redirectLocation.referer = undefined;
+                    // Carry the original page occurrence through every hop. Redirect chain
+                    // checks need to point back to the source markup, not lose attribution at
+                    // the first intermediate URL.
+                    redirectLocation.referer = location.referer;
+                    redirectLocation.htmlSnippet = location.htmlSnippet;
                     redirectLocation.redirectedFrom = location.url;
                     redirectLocation.redirectRoot = redirectRoot;
                     redirectLocation.redirectChain = redirectChain;
@@ -891,7 +910,10 @@ export class Arachnodex {
                                 && this.runtime.urlHelper.validateLocation(previewLocation.url, 'urlMustContain')
                             ) {
                                 newLocation.htmlSnippet = pageLink.htmlSnippet;
-                                pageLink.normalizedUrl = previewLocation.url;
+                                pageLink.normalizedUrl = getObservedLinkUrl(
+                                    previewLocation.url,
+                                    pageLink.normalizedUrl
+                                );
                                 pageLink.isExternal = false;
                                 pageLink.isCrawlable = true;
 

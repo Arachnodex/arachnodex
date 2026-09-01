@@ -4,7 +4,7 @@ import {CommandExit, JobCommandParser, type ArgumentConfig} from "@arachnodex/co
 
 export default class LinkIssuesCmd extends JobCommandParser {
 
-    version: string = '1.0.9';
+    version: string = '1.0.10';
 
     constructor(args: string[], job: string)  {
 

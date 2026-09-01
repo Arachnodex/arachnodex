@@ -137,15 +137,20 @@ export default class Sitemap extends BaseJob {
 
     onPageReceived(_response: AxiosResponse | null, _pageData: PageData) {
         const pageUrl = _pageData.location.url;
+        const headerLastModified = this.headerLastModifiedByUrl.get(pageUrl) ?? '';
+
+        // Body classification resolves all HEAD metadata for this URL. Delete it immediately
+        // so memory is bounded by active/unresolved requests instead of total crawl size.
+        this.headerLastModifiedByUrl.delete(pageUrl);
+        this.headerDocumentCandidates.delete(pageUrl);
+
         if(typeof _pageData.auditOutcome !== 'undefined') {
-            this.bodyClassifiedUrls.add(pageUrl);
             if(_pageData.auditOutcome.status === 'non-html') {
                 if(this.includeDocs && this.matchesIncludeDocPattern(_pageData.auditOutcome.contentType)) {
                     this.addLocation(
                         _pageData.location,
                         _pageData.auditOutcome.lastModified
-                            ?? this.headerLastModifiedByUrl.get(pageUrl)
-                            ?? '',
+                            ?? headerLastModified,
                         true
                     );
                 }
@@ -156,7 +161,6 @@ export default class Sitemap extends BaseJob {
             }
         }
         if(_response === null) { return; }
-        this.bodyClassifiedUrls.add(pageUrl);
 
         // Content Type Guard Clause
         if(!isHtmlContentType(_pageData.contentType)) return;
@@ -314,11 +318,11 @@ export default class Sitemap extends BaseJob {
     }
 
     private addUnresolvedHeaderDocuments(): void {
-        this.headerDocumentCandidates.forEach((candidate, url) => {
-            if(!this.bodyClassifiedUrls.has(url)) {
-                this.addLocation(candidate.location, candidate.lastModifiedHeader, true);
-            }
+        this.headerDocumentCandidates.forEach(candidate => {
+            this.addLocation(candidate.location, candidate.lastModifiedHeader, true);
         });
+        this.headerDocumentCandidates.clear();
+        this.headerLastModifiedByUrl.clear();
     }
 
     async pipeData(writer: FileHandle, readFile: string) {

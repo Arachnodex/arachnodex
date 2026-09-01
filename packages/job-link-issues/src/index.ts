@@ -1834,10 +1834,16 @@ export default class LinkIssues extends BaseJob {
         // Report entries collapse repeated raw issues into stable keys while preserving
         // occurrence counts and source pages for detail output.
         const entries = new Map<string, ReportIssueEntry>();
+        const targetOccurrencesByEntry = new Map<string, LinkOccurrence[]>();
         issues.forEach(issue => {
             const key = this.getReportKey(issue);
             const occurrenceDetails = this.getIssueOccurrenceDetails(issue);
-            const targetOccurrenceDetails = this.getTargetOccurrenceDetails(issue);
+            let targetOccurrenceDetails = targetOccurrencesByEntry.get(key);
+            const targetOccurrencesAlreadyAggregated = typeof targetOccurrenceDetails !== 'undefined';
+            if(typeof targetOccurrenceDetails === 'undefined') {
+                targetOccurrenceDetails = this.getTargetOccurrenceDetails(issue);
+                targetOccurrencesByEntry.set(key, targetOccurrenceDetails);
+            }
             let entry = entries.get(key);
             if(typeof entry === 'undefined') {
                 entry = {
@@ -1849,7 +1855,9 @@ export default class LinkIssues extends BaseJob {
                 entries.set(key, entry);
             }
             if(targetOccurrenceDetails.length > 0) {
-                targetOccurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
+                if(!targetOccurrencesAlreadyAggregated) {
+                    targetOccurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
+                }
                 occurrenceDetails.forEach(occurrence => entry.sourceUrls.add(occurrence.referer));
                 entry.count = Math.max(
                     entry.count,

@@ -20,7 +20,7 @@ export default class SitemapCmd extends JobCommandParser {
         super(args, switches, job);
 
         if(this.arguments['-V'].active === true) {
-            console.log('Sitemap Generator Job Version 1.0.2');
+            console.log('Sitemap Generator Job Version 1.0.3');
             throw new CommandExit(0);
         }
     }

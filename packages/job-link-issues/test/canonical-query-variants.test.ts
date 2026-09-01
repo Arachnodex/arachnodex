@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 
 import type {AxiosResponse} from "axios";
 import {JSDOM} from "jsdom";
-import type {PageData, PageLink} from "@arachnodex/core";
+import {isCommandExit, type PageData, type PageLink} from "@arachnodex/core";
 
+import LinkIssuesCmd from "../src/cmd.ts";
 import LinkIssues from "../src/index.ts";
 
 type IssueLike = {
@@ -40,6 +42,26 @@ type JobConfigOverrides = {
 
 const baseUrl = "https://example.test";
 const response = {} as AxiosResponse;
+
+test("version output matches the package manifest", () => {
+    const packageVersion = (JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf8")
+    ) as {version: string}).version;
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+    try {
+        assert.throws(
+            () => new LinkIssuesCmd(["--version"], "link-issues"),
+            error => isCommandExit(error) && error.statusCode === 0
+        );
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.deepEqual(lines, [`Link Issues Job Version ${packageVersion}`]);
+});
 
 function createJob({
     includeAssets = false,
@@ -736,4 +758,61 @@ test("missing canonical and redirect final statuses produce explicit unverified 
         && issue.targetUrl === redirectUrl
         && issue.finalUrl === finalUrl));
     assert.equal(job.getReportData()["Unverified Deferred Checks"], 2);
+});
+
+test("report aggregation traverses target occurrences once per grouped entry", () => {
+    const job = createJob();
+    const targetUrl = `${baseUrl}/missing`;
+    const occurrenceCount = 500;
+    const occurrences = Array.from({length: occurrenceCount}, (_value, index) => ({
+        referer: `${baseUrl}/source-${index}`,
+        zone: "main" as const
+    }));
+    let occurrenceTraversals = 0;
+    const observedOccurrences = new Proxy(occurrences, {
+        get(target, property, receiver) {
+            if(property === "forEach") {
+                return (callback: (occurrence: typeof occurrences[number], index: number) => void) => {
+                    occurrenceTraversals++;
+                    target.forEach(callback);
+                };
+            }
+            return Reflect.get(target, property, receiver);
+        }
+    });
+    job.issueOccurrences.set(targetUrl, {
+        targetUrl,
+        occurrenceCount,
+        pageUrls: new Set(occurrences.map(occurrence => occurrence.referer)),
+        wrapperOccurrenceCount: 0,
+        wrapperPageUrls: new Set(),
+        zones: {
+            nav: 0,
+            header: 0,
+            footer: 0,
+            aside: 0,
+            "before-main": 0,
+            "after-main": 0,
+            main: occurrenceCount,
+            unknown: 0
+        },
+        occurrences: observedOccurrences
+    });
+
+    occurrences.forEach(occurrence => {
+        job.onHeadersReceived({status: 404} as AxiosResponse, {
+            url: targetUrl,
+            rawUrl: "/missing",
+            referer: occurrence.referer
+        });
+    });
+
+    const entries = (job as unknown as {
+        getReportEntries(rawIssues: IssueLike[]): Array<{count: number; sourceUrls: Set<string>}>;
+    }).getReportEntries(issues(job));
+
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].count, occurrenceCount);
+    assert.equal(entries[0].sourceUrls.size, occurrenceCount);
+    assert.equal(occurrenceTraversals, 1);
 });

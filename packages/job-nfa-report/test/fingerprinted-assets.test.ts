@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 
 import {JSDOM} from "jsdom";
-import type {JSONObject, PageData} from "@arachnodex/core";
+import {isCommandExit, type JSONObject, type PageData} from "@arachnodex/core";
 
 import NfaReportCmd from "../src/cmd.ts";
 import NfaReport from "../src/index.ts";
@@ -14,6 +15,26 @@ type FindingLike = {
 type JobConfig = Record<string, unknown>;
 
 const baseUrl = "https://slide.local";
+const packageVersion = (JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+) as {version: string}).version;
+
+test("version output matches the package manifest", () => {
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+    try {
+        assert.throws(
+            () => new NfaReportCmd(["--version"], "nfa-report"),
+            error => isCommandExit(error) && error.statusCode === 0
+        );
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.deepEqual(lines, [`NFA Report Job Version ${packageVersion}`]);
+});
 
 function createJob(args: string[] = [], configOverrides: JobConfig = {}): NfaReport {
     const config = {

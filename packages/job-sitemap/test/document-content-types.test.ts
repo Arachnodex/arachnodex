@@ -1,12 +1,34 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 
 import type {AxiosResponse} from "axios";
-import type {PageData} from "@arachnodex/core";
+import {isCommandExit, type PageData} from "@arachnodex/core";
 
+import SitemapCmd from "../src/cmd.ts";
 import Sitemap from "../src/index.ts";
 
 const baseUrl = "https://example.test";
+
+test("version output matches the package manifest", () => {
+    const packageVersion = (JSON.parse(
+        readFileSync(new URL("../package.json", import.meta.url), "utf8")
+    ) as {version: string}).version;
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => lines.push(args.map(String).join(" "));
+
+    try {
+        assert.throws(
+            () => new SitemapCmd(["--version"], "sitemap"),
+            error => isCommandExit(error) && error.statusCode === 0
+        );
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.deepEqual(lines, [`Sitemap Generator Job Version ${packageVersion}`]);
+});
 
 function createJob({
     includeDocs = true,
@@ -92,6 +114,9 @@ test("GET HTML classification overrides a misleading document HEAD response", ()
     assert.equal(job.pageUrlCount, 1);
     assert.equal(job.docUrlCount, 0);
     assert.deepEqual(job.loggedUrls, [url]);
+    assert.equal(job.headerLastModifiedByUrl.size, 0);
+    assert.equal(job.headerDocumentCandidates.size, 0);
+    assert.equal(job.bodyClassifiedUrls.size, 0);
 });
 
 test("matching HEAD and GET document types produce one document entry", () => {
@@ -107,6 +132,8 @@ test("matching HEAD and GET document types produce one document entry", () => {
 
     assert.equal(job.docUrlCount, 1);
     assert.deepEqual(job.loggedUrls, [url]);
+    assert.equal(job.headerLastModifiedByUrl.size, 0);
+    assert.equal(job.headerDocumentCandidates.size, 0);
 });
 
 test("unresolved HEAD document candidates retain legacy includeDocPattern behavior", () => {
@@ -118,6 +145,8 @@ test("unresolved HEAD document candidates retain legacy includeDocPattern behavi
 
     assert.equal(job.docUrlCount, 1);
     assert.deepEqual(job.loggedUrls, [url]);
+    assert.equal(job.headerLastModifiedByUrl.size, 0);
+    assert.equal(job.headerDocumentCandidates.size, 0);
 });
 
 test("includeDocs still disables document collection on both HEAD and GET paths", () => {

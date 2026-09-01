@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
 import test from "node:test";
 import {stripVTControlCharacters} from "node:util";
 
@@ -10,6 +11,10 @@ import CspReportCmd from "../src/cmd.ts";
 import CspReport from "../src/index.ts";
 
 type JobConfig = Record<string, unknown>;
+
+const packageVersion = (JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8")
+) as {version: string}).version;
 
 type CspReportState = CspReport & {
     buildPolicy: () => string;
@@ -118,7 +123,7 @@ test("command parser exposes version and expected help switches", () => {
             return isRecord(error) && error.statusCode === 0;
         });
     });
-    assert.deepEqual(lines, ["CSP Report Job Version 1.0.0"]);
+    assert.deepEqual(lines, [`CSP Report Job Version ${packageVersion}`]);
 
     const help = new CspReportCmd([], "csp-report").getHelpMessage();
     assert.match(help, /-o <apache\|nginx\|lighttpd\|raw>, --output=<apache\|nginx\|lighttpd\|raw>/);

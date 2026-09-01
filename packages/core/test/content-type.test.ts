@@ -11,12 +11,12 @@ import {isHtmlContentType, normalizeContentTypeHeader} from "../src/services/con
 
 const testUrl = "https://example.test/page";
 
-function response<T>(status: number, contentType: string, data: T): AxiosResponse<T> {
+function response<T>(status: number, contentType: string|undefined, data: T): AxiosResponse<T> {
     return {
         data,
         status,
         statusText: String(status),
-        headers: {'content-type': contentType},
+        headers: typeof contentType === 'undefined' ? {} : {'content-type': contentType},
         config: {headers: {}}
     } as unknown as AxiosResponse<T>;
 }
@@ -106,6 +106,120 @@ test("GET content type overrides a misleading non-HTML HEAD content type", async
     assert.equal(visited[testUrl].dataReceived, true);
 });
 
+test("successful HEAD content type classifies an unlabeled GET response", async t => {
+    const {events, location, thread, visited} = createThread();
+    let pageResponse: AxiosResponse|null = null;
+    events.on('page-received', (received: AxiosResponse|null) => {
+        pageResponse = received;
+    });
+
+    t.mock.method(axios, 'head', async () => response(200, "Application/XHTML+XML", undefined));
+    t.mock.method(axios, 'get', async () => response(
+        200,
+        undefined,
+        Readable.from(["<html><body>HEAD fallback</body></html>"])
+    ));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(pageResponse?.data, "<html><body>HEAD fallback</body></html>");
+    assert.equal(normalizeContentTypeHeader(pageResponse?.headers['content-type']), "application/xhtml+xml");
+    assert.equal(visited[testUrl].dataReceived, true);
+});
+
+test("successful non-HTML HEAD content type avoids reading an unlabeled GET body", async t => {
+    const {events, location, thread, visited} = createThread();
+    let readCount = 0;
+    const body = new Readable({
+        read() {
+            readCount++;
+            this.push(Buffer.alloc(1024));
+            this.push(null);
+        }
+    });
+    let outcome: PageAuditOutcome|undefined;
+    events.on('page-received', (_response: AxiosResponse|null, _location: Location, value?: PageAuditOutcome) => {
+        outcome = value;
+    });
+
+    t.mock.method(axios, 'head', async () => response(200, "application/pdf", undefined));
+    t.mock.method(axios, 'get', async () => response(200, undefined, body));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(outcome?.status, "non-html");
+    assert.equal(outcome?.contentType, "application/pdf");
+    assert.equal(body.destroyed, true);
+    assert.equal(readCount, 0);
+    assert.equal(visited[testUrl].dataReceived, undefined);
+});
+
+test("unlabeled HTML is detected from a bounded document prefix", async t => {
+    const {events, location, thread, visited} = createThread();
+    let pageResponse: AxiosResponse|null = null;
+    events.on('page-received', (received: AxiosResponse|null) => {
+        pageResponse = received;
+    });
+
+    const html = "\uFEFF  <!-- deployment marker -->\n<!DOCTYPE html><html><body>sniffed</body></html>";
+    t.mock.method(axios, 'head', async () => response(200, undefined, undefined));
+    t.mock.method(axios, 'get', async () => response(200, undefined, Readable.from([html])));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(pageResponse?.data, html);
+    assert.equal(normalizeContentTypeHeader(pageResponse?.headers['content-type']), "text/html");
+    assert.equal(visited[testUrl].dataReceived, true);
+});
+
+test("an unsuccessful HEAD content type does not override an unlabeled GET body", async t => {
+    const {events, location, thread, visited} = createThread();
+    let pageResponse: AxiosResponse|null = null;
+    events.on('page-received', (received: AxiosResponse|null) => {
+        pageResponse = received;
+    });
+
+    t.mock.method(axios, 'head', async () => response(405, "application/pdf", undefined));
+    t.mock.method(axios, 'get', async () => response(
+        200,
+        undefined,
+        Readable.from(["<!doctype html><html><body>GET wins</body></html>"])
+    ));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(pageResponse?.data, "<!doctype html><html><body>GET wins</body></html>");
+    assert.equal(normalizeContentTypeHeader(pageResponse?.headers['content-type']), "text/html");
+    assert.equal(visited[testUrl].dataReceived, true);
+});
+
+test("unlabeled unknown bodies are abandoned after the bounded HTML sniff", async t => {
+    const {events, location, thread, visited} = createThread();
+    let yieldedChunks = 0;
+    async function* unknownBody() {
+        for(let i = 0; i < 1024; i++) {
+            yieldedChunks++;
+            yield Buffer.alloc(1024, i === 0 ? '{'.charCodeAt(0) : 1);
+        }
+    }
+    const body = Readable.from(unknownBody(), {objectMode: false});
+    let outcome: PageAuditOutcome|undefined;
+    events.on('page-received', (_response: AxiosResponse|null, _location: Location, value?: PageAuditOutcome) => {
+        outcome = value;
+    });
+
+    t.mock.method(axios, 'head', async () => response(200, undefined, undefined));
+    t.mock.method(axios, 'get', async () => response(200, undefined, body));
+
+    await thread.fetch(location, visited);
+
+    assert.equal(outcome?.status, "non-html");
+    assert.equal(outcome?.contentType, "");
+    assert.equal(body.destroyed, true);
+    assert.ok(yieldedChunks <= 9, `expected at most 9 KiB to be read, read ${yieldedChunks} KiB`);
+    assert.equal(visited[testUrl].dataReceived, undefined);
+});
+
 test("confirmed non-HTML GET responses are destroyed without buffering", async t => {
     const {events, location, thread, visited} = createThread();
     let readCount = 0;
@@ -157,7 +271,9 @@ test("GET replaces HEAD when the server rejects HEAD", async t => {
 test("body failures retry independently and emit an incomplete audit outcome", async t => {
     const {events, location, thread, visited} = createThread(1);
     let getCount = 0;
+    const statuses: number[] = [];
     let outcome: PageAuditOutcome|undefined;
+    events.on('headers-received', (received: AxiosResponse) => statuses.push(received.status));
     events.on('page-received', (_response: AxiosResponse|null, _location: Location, value?: PageAuditOutcome) => {
         outcome = value;
     });
@@ -176,6 +292,8 @@ test("body failures retry independently and emit an incomplete audit outcome", a
         assert.equal(outcome.phase, "body-fetch");
         assert.equal(outcome.statusCode, 503);
     }
-    assert.equal(visited[testUrl].statusCode, 200);
+    assert.deepEqual(statuses, [200, 503]);
+    assert.equal(location.statusCode, 503);
+    assert.equal(visited[testUrl].statusCode, 503);
     assert.equal(visited[testUrl].dataReceived, undefined);
 });
